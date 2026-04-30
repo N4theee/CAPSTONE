@@ -1,0 +1,15 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Push to GitHub",
+			"type": "shell",
+			"command": "git add . && git commit -m \"Initial commit\" && git remote add origin https://github.com/N4theee/CAPSTONE.git && git push -u origin main"
+		},
+		{
+			"label": "Push to GitHub",
+			"type": "shell",
+			"command": "git add . ; git commit -m \"Initial commit\" ; git remote add origin https://github.com/N4theee/CAPSTONE.git ; git push -u origin main"
+		}
+	]
+}
