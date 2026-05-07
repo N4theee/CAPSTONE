@@ -1,9 +1,13 @@
 import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart'; // ✅ FIX
+import 'package:permission_handler/permission_handler.dart';
+
 import '../config.dart';
 import '../services/ble_service.dart';
 import '../services/supabase_service.dart';
+import '../ui/responsive.dart';
 
 class StudentScreen extends StatefulWidget {
   const StudentScreen({
@@ -16,12 +20,13 @@ class StudentScreen extends StatefulWidget {
   final String studentId;
   final String studentName;
   final SubjectOffering offering;
+
   @override
   State<StudentScreen> createState() => _StudentScreenState();
 }
 
 class _StudentScreenState extends State<StudentScreen>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, TickerProviderStateMixin {
   final _ble = BleService();
   final _db = SupabaseService();
   StreamSubscription<bool>? _proximitySub;
@@ -35,16 +40,29 @@ class _StudentScreenState extends State<StudentScreen>
   String? _sessionId;
   String? _subject;
   String? _beaconUuid;
+  DateTime? _sessionStartedAt;
 
   Map<String, int> _nearbyDevices = {};
   bool _scanningNearby = false;
 
   Timer? _sessionPollTimer;
+  Timer? _uiClockTimer;
+
+  late AnimationController _pulseController;
+
+  static const _purple = Color(0xFF6246EA);
+  static const _purpleDark = Color(0xFF2E2A5E);
+  static const _success = Color(0xFF4ADE80);
+  static const _pageBg = Color(0xFFF3F4FA);
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2200),
+    )..repeat(reverse: true);
     _init();
   }
 
@@ -81,6 +99,15 @@ class _StudentScreenState extends State<StudentScreen>
     await _checkSession();
   }
 
+  void _syncUiClock() {
+    _uiClockTimer?.cancel();
+    if (_sessionActive && _sessionStartedAt != null) {
+      _uiClockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) setState(() {});
+      });
+    }
+  }
+
   Future<void> _checkSession() async {
     try {
       final sessionForProfessor =
@@ -88,37 +115,49 @@ class _StudentScreenState extends State<StudentScreen>
 
       if (sessionForProfessor != null) {
         final newId = sessionForProfessor['id'] as String;
-        final dynamic beaconRaw =
-            sessionForProfessor['beacon_uuid'] ?? sessionForProfessor['beacon_name'];
+        final dynamic beaconRaw = sessionForProfessor['beacon_uuid'] ??
+            sessionForProfessor['beacon_name'];
         if (beaconRaw == null) {
           throw Exception('Session is missing beacon identifier');
         }
         final dynamic beaconNameRaw = sessionForProfessor['beacon_name'];
         final newBeaconUuid = beaconRaw.toString();
         final newBeaconName = beaconNameRaw?.toString();
+        final startedStr = sessionForProfessor['started_at'] as String?;
+        final started = startedStr != null
+            ? DateTime.parse(startedStr).toLocal()
+            : null;
 
         if (_sessionId != newId) {
           setState(() {
             _sessionId = newId;
-            _subject = sessionForProfessor['subject'];
+            _subject = sessionForProfessor['subject'] as String?;
             _beaconUuid = newBeaconUuid;
             _sessionActive = true;
             _attended = false;
+            _sessionStartedAt = started;
           });
+          _syncUiClock();
 
           await _ble.startProximityScanning(
             newBeaconUuid,
             beaconName: newBeaconName ?? AppConfig.defaultBeaconName,
           );
+        } else if (mounted && _sessionStartedAt == null && started != null) {
+          setState(() => _sessionStartedAt = started);
+          _syncUiClock();
         }
       } else {
         if (_sessionActive) {
           _ble.stopProximityScanning();
+          _uiClockTimer?.cancel();
+          _uiClockTimer = null;
           setState(() {
             _sessionActive = false;
             _inRange = false;
             _sessionId = null;
             _beaconUuid = null;
+            _sessionStartedAt = null;
           });
         }
       }
@@ -172,113 +211,947 @@ class _StudentScreenState extends State<StudentScreen>
         .showSnackBar(SnackBar(content: Text(msg)));
   }
 
+  void _openHowItWorks() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('How it works'),
+        content: const Text(
+          'Your phone listens for the professor’s Bluetooth beacon. '
+          'Keep Bluetooth and Location on and stay within range to mark attendance.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openSettingsSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Permissions',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Bluetooth and location access are required to verify you are near the class.',
+              ),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  openAppSettings();
+                },
+                child: const Text('Open system settings'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _elapsedLabel() {
+    final start = _sessionStartedAt;
+    if (start == null) return '00:00:00';
+    final d = DateTime.now().difference(start);
+    final h = d.inHours.toString().padLeft(2, '0');
+    final m = (d.inMinutes % 60).toString().padLeft(2, '0');
+    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '$h:$m:$s';
+  }
+
+  String _startedTimeLabel() {
+    final start = _sessionStartedAt;
+    if (start == null) return '—';
+    final h = start.hour > 12 ? start.hour - 12 : (start.hour == 0 ? 12 : start.hour);
+    final ampm = start.hour >= 12 ? 'PM' : 'AM';
+    final mm = start.minute.toString().padLeft(2, '0');
+    return '$h:$mm $ampm';
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _sessionPollTimer?.cancel();
+    _uiClockTimer?.cancel();
     _proximitySub?.cancel();
+    _pulseController.dispose();
     _ble.stopProximityScanning();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final courseTitle =
+        '${widget.offering.subjectCode} - ${widget.offering.subjectTitle}';
+    final pad = AppBreakpoints.horizontalPadding(context);
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    final radarH = AppBreakpoints.sessionRadarHeight(context, max: 280);
+
     return Scaffold(
+      backgroundColor: _pageBg,
       appBar: AppBar(
-        title: const Text('Student'),
-        backgroundColor: const Color(0xFF00897B),
+        backgroundColor: _purpleDark,
         foregroundColor: Colors.white,
+        elevation: 0,
+        title: const Text(
+          'Student',
+          style: TextStyle(fontWeight: FontWeight.w600),
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'Settings',
+            onPressed: _openSettingsSheet,
+            icon: const Icon(Icons.settings_outlined),
+          ),
+        ],
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
+        padding: EdgeInsets.fromLTRB(pad, 16, pad, 28 + bottomInset),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (!_bleGranted)
-              ElevatedButton(
-                onPressed: () async {
-                  await openAppSettings();
-                },
-                child: const Text('Grant Permissions'),
-              ),
-
-            const SizedBox(height: 20),
-
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFF00897B).withValues(alpha: 0.2)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(_subject ?? 'No active subject'),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${widget.studentName} (${widget.studentId})',
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _attended
-                        ? 'Attendance already marked'
-                        : _inRange
-                            ? 'You are in range of the professor'
-                            : 'You are out of range',
-                    style: TextStyle(
-                      color: _attended
-                          ? Colors.green
-                          : _inRange
-                              ? const Color(0xFF00897B)
-                              : Colors.grey,
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Material(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(14),
+                  child: InkWell(
+                    onTap: () => openAppSettings(),
+                    borderRadius: BorderRadius.circular(14),
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Row(
+                        children: [
+                          Icon(Icons.warning_amber_rounded,
+                              color: Colors.orange.shade800),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'Grant Bluetooth and Location in settings to use proximity.',
+                              style: TextStyle(
+                                color: Colors.orange.shade900,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                          const Icon(Icons.chevron_right),
+                        ],
+                      ),
                     ),
                   ),
-                ],
+                ),
+              ),
+            _SessionHeroCard(
+              sessionActive: _sessionActive,
+              attended: _attended,
+              inRange: _inRange,
+              courseTitle: courseTitle,
+              section: widget.offering.section,
+              professorName: widget.offering.professorName,
+              subjectFallback: _subject ?? 'No active session',
+              elapsed: _elapsedLabel(),
+              purple: _purple,
+              purpleDark: _purpleDark,
+              success: _success,
+            ),
+            const SizedBox(height: 14),
+            _ProximityBanner(
+              purple: _purple,
+              onHowItWorks: _openHowItWorks,
+            ),
+            const SizedBox(height: 20),
+            Text(
+              _sessionActive
+                  ? (_inRange
+                      ? 'You are within range of the class beacon.'
+                      : 'Move closer until you are in range.')
+                  : 'Waiting for your professor to start a session.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13,
+                color: Colors.grey.shade700,
+                fontWeight: FontWeight.w500,
               ),
             ),
-
-            const SizedBox(height: 12),
-
-            ElevatedButton.icon(
-              onPressed:
-                  (_inRange && _sessionActive && !_attended)
-                      ? _markAttendance
-                      : null,
-              icon: _loading
+            const SizedBox(height: 16),
+            _StudentRadarPanel(
+              height: radarH,
+              pulse: _pulseController,
+              inRange: _inRange,
+              sessionActive: _sessionActive,
+              purple: _purple,
+              success: _success,
+            ),
+            const SizedBox(height: 22),
+            _MarkAttendanceButton(
+              enabled: _inRange && _sessionActive && !_attended,
+              loading: _loading,
+              onPressed: _markAttendance,
+              purple: _purple,
+            ),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.shield_outlined, size: 16, color: _purple),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    'You can only mark once per session',
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: _purple.withValues(alpha: 0.85),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 22),
+            _SessionInfoCard(
+              startedLabel: _startedTimeLabel(),
+              purple: _purple,
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: _scanningNearby ? null : _scanNearby,
+              icon: _scanningNearby
                   ? const SizedBox(
                       width: 18,
                       height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Icon(Icons.how_to_reg),
-              label: Text(_loading ? 'Marking...' : 'Mark Attendance'),
+                  : const Icon(Icons.bluetooth_searching_rounded),
+              label: Text(
+                _scanningNearby ? 'Scanning nearby…' : 'Scan nearby devices',
+              ),
             ),
-
-            const Divider(),
-
-            OutlinedButton(
-              onPressed: _scanningNearby ? null : _scanNearby,
-              child: Text(_scanningNearby
-                  ? 'Scanning...'
-                  : 'Scan Nearby Devices'),
-            ),
-
-            if (_nearbyDevices.isNotEmpty)
+            if (_nearbyDevices.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                'Nearby (debug)',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey.shade800,
+                ),
+              ),
+              const SizedBox(height: 8),
               ...(_nearbyDevices.entries.toList()
                     ..sort((a, b) => b.value.compareTo(a.value)))
-                  .map((e) => Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
-                        child: Row(
-                          children: [
-                            Expanded(child: Text(e.key)),
-                            Text('${e.value} dBm'),
-                          ],
-                        ),
-                      )),
+                  .map(
+                    (e) => Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        children: [
+                          Expanded(child: Text(e.key)),
+                          Text('${e.value} dBm'),
+                        ],
+                      ),
+                    ),
+                  ),
+            ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _SessionHeroCard extends StatelessWidget {
+  const _SessionHeroCard({
+    required this.sessionActive,
+    required this.attended,
+    required this.inRange,
+    required this.courseTitle,
+    required this.section,
+    required this.professorName,
+    required this.subjectFallback,
+    required this.elapsed,
+    required this.purple,
+    required this.purpleDark,
+    required this.success,
+  });
+
+  final bool sessionActive;
+  final bool attended;
+  final bool inRange;
+  final String courseTitle;
+  final String section;
+  final String professorName;
+  final String subjectFallback;
+  final String elapsed;
+  final Color purple;
+  final Color purpleDark;
+  final Color success;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: purpleDark,
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: [
+          BoxShadow(
+            color: purpleDark.withValues(alpha: 0.35),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: sessionActive
+                      ? success.withValues(alpha: 0.2)
+                      : Colors.white.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: sessionActive
+                        ? success.withValues(alpha: 0.5)
+                        : Colors.white24,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.wifi_tethering,
+                      size: 16,
+                      color: sessionActive ? success : Colors.white54,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      sessionActive ? 'Active Session' : 'No active session',
+                      style: TextStyle(
+                        color: sessionActive ? success : Colors.white60,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Spacer(),
+              Icon(Icons.schedule_rounded,
+                  color: Colors.white.withValues(alpha: 0.7), size: 18),
+              const SizedBox(width: 4),
+              Text(
+                sessionActive ? elapsed : '—',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.menu_book_rounded,
+                    color: Colors.white, size: 24),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      sessionActive ? courseTitle : subjectFallback,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        height: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Section $section',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.65),
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Prof. $professorName',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.65),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Divider(color: Colors.white.withValues(alpha: 0.12)),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: attended
+                      ? success
+                      : (inRange && sessionActive ? success : Colors.white38),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  !sessionActive
+                      ? 'Session not started'
+                      : attended
+                          ? 'Attendance recorded'
+                          : inRange
+                              ? 'You are in range'
+                              : 'Out of range — move closer',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.92),
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+              Icon(
+                Icons.signal_cellular_alt_rounded,
+                color: sessionActive && inRange ? success : Colors.white38,
+                size: 20,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                !sessionActive
+                    ? '—'
+                    : inRange
+                        ? 'Strong'
+                        : 'Weak',
+                style: TextStyle(
+                  color: sessionActive && inRange ? success : Colors.white54,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProximityBanner extends StatelessWidget {
+  const _ProximityBanner({
+    required this.purple,
+    required this.onHowItWorks,
+  });
+
+  final Color purple;
+  final VoidCallback onHowItWorks;
+
+  @override
+  Widget build(BuildContext context) {
+    final howBtn = TextButton.icon(
+      onPressed: onHowItWorks,
+      icon: Icon(Icons.info_outline, size: 18, color: purple),
+      label: Text('How it works', style: TextStyle(color: purple)),
+    );
+    return LayoutBuilder(
+      builder: (context, c) {
+        final narrow = c.maxWidth < 360;
+        final iconCircle = Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: purple.withValues(alpha: 0.12),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(Icons.near_me_rounded, color: purple, size: 22),
+        );
+        final copy = Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Stay near the professor to stay in range',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                  color: Colors.grey.shade900,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'Bluetooth must be ON',
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              ),
+            ],
+          ),
+        );
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.06),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: narrow
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        iconCircle,
+                        const SizedBox(width: 12),
+                        copy,
+                      ],
+                    ),
+                    Align(alignment: Alignment.centerRight, child: howBtn),
+                  ],
+                )
+              : Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    iconCircle,
+                    const SizedBox(width: 12),
+                    copy,
+                    howBtn,
+                  ],
+                ),
+        );
+      },
+    );
+  }
+}
+
+class _StudentRadarPanel extends StatelessWidget {
+  const _StudentRadarPanel({
+    required this.height,
+    required this.pulse,
+    required this.inRange,
+    required this.sessionActive,
+    required this.purple,
+    required this.success,
+  });
+
+  final double height;
+  final Animation<double> pulse;
+  final bool inRange;
+  final bool sessionActive;
+  final Color purple;
+  final Color success;
+
+  Widget _signalCard() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 10,
+          ),
+        ],
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.signal_cellular_alt_rounded,
+                  color: inRange && sessionActive ? success : Colors.grey,
+                  size: 18),
+              const SizedBox(width: 6),
+              Text(
+                sessionActive && inRange ? 'Strong' : '—',
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  color: inRange && sessionActive ? success : Colors.grey,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            sessionActive && inRange ? 'In range' : 'No lock',
+            style: TextStyle(
+              fontSize: 11,
+              color: Colors.grey.shade600,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          Text(
+            sessionActive && inRange ? 'Excellent' : 'Move closer',
+            style: TextStyle(
+              fontSize: 11,
+              color: Colors.grey.shade500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hub = (height * 0.29).clamp(64.0, 84.0);
+    final iconSz = (hub * 0.52).clamp(30.0, 42.0);
+    final topPad = (height * 0.1).clamp(18.0, 32.0);
+
+    return LayoutBuilder(
+      builder: (context, c) {
+        final narrow = c.maxWidth < 400;
+        final stackHeight = narrow ? height * 0.82 : height;
+
+        final radarStack = SizedBox(
+          height: stackHeight,
+          child: Stack(
+            alignment: Alignment.center,
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(22),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.05),
+                      blurRadius: 14,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(22),
+                  child: CustomPaint(
+                    painter: _StudentRadarRingsPainter(
+                      active: sessionActive && inRange,
+                      purple: purple,
+                    ),
+                    child: const SizedBox.expand(),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: topPad,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: (hub * 0.52).clamp(36.0, 44.0),
+                      height: (hub * 0.52).clamp(36.0, 44.0),
+                      decoration: BoxDecoration(
+                        color: success,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: success.withValues(alpha: 0.35),
+                            blurRadius: 10,
+                          ),
+                        ],
+                      ),
+                      child: Icon(Icons.school_rounded,
+                          color: Colors.white, size: iconSz * 0.55),
+                    ),
+                    const SizedBox(height: 4),
+                    CustomPaint(
+                      size: Size(2, (stackHeight * 0.12).clamp(24.0, 40.0)),
+                      painter: _DottedLinePainter(
+                          color: purple.withValues(alpha: 0.35)),
+                    ),
+                  ],
+                ),
+              ),
+              AnimatedBuilder(
+                animation: pulse,
+                builder: (context, child) {
+                  final scale =
+                      inRange && sessionActive ? 1.0 + pulse.value * 0.06 : 1.0;
+                  return Transform.scale(
+                    scale: scale,
+                    child: child,
+                  );
+                },
+                child: Container(
+                  width: hub,
+                  height: hub,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white,
+                    boxShadow: [
+                      BoxShadow(
+                        color: purple.withValues(alpha: inRange ? 0.45 : 0.2),
+                        blurRadius: 22,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                    border: Border.all(color: purple.withValues(alpha: 0.35)),
+                  ),
+                  child: Icon(Icons.person_rounded, color: purple, size: iconSz),
+                ),
+              ),
+              if (!narrow)
+                Positioned(
+                  right: (c.maxWidth * 0.06).clamp(12.0, 28.0),
+                  top: stackHeight * 0.38,
+                  child: _signalCard(),
+                ),
+            ],
+          ),
+        );
+
+        if (narrow) {
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              radarStack,
+              const SizedBox(height: 10),
+              Center(child: _signalCard()),
+            ],
+          );
+        }
+
+        return SizedBox(height: height, child: radarStack);
+      },
+    );
+  }
+}
+
+class _StudentRadarRingsPainter extends CustomPainter {
+  _StudentRadarRingsPainter({required this.active, required this.purple});
+
+  final bool active;
+  final Color purple;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = Offset(size.width / 2, size.height / 2 + 10);
+    final maxR = size.shortestSide * 0.38;
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = purple.withValues(alpha: active ? 0.12 : 0.06);
+    for (var i = 1; i <= 4; i++) {
+      canvas.drawCircle(c, maxR * i / 4, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _StudentRadarRingsPainter oldDelegate) {
+    return oldDelegate.active != active;
+  }
+}
+
+class _DottedLinePainter extends CustomPainter {
+  _DottedLinePainter({required this.color});
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const dash = 4.0;
+    const gap = 4.0;
+    double y = 0;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 2;
+    while (y < size.height) {
+      canvas.drawLine(Offset(0, y), Offset(0, y + dash), paint);
+      y += dash + gap;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DottedLinePainter oldDelegate) =>
+      oldDelegate.color != color;
+}
+
+class _MarkAttendanceButton extends StatelessWidget {
+  const _MarkAttendanceButton({
+    required this.enabled,
+    required this.loading,
+    required this.onPressed,
+    required this.purple,
+  });
+
+  final bool enabled;
+  final bool loading;
+  final VoidCallback onPressed;
+  final Color purple;
+
+  @override
+  Widget build(BuildContext context) {
+    return Opacity(
+      opacity: enabled ? 1 : 0.45,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          gradient: LinearGradient(
+            colors: [purple, Color.lerp(purple, const Color(0xFF3B82F6), 0.35)!],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: purple.withValues(alpha: 0.28),
+              blurRadius: 16,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: enabled && !loading ? onPressed : null,
+            borderRadius: BorderRadius.circular(18),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (loading)
+                    const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  else
+                    const Icon(Icons.check_circle_outline_rounded,
+                        color: Colors.white, size: 24),
+                  const SizedBox(width: 10),
+                  Text(
+                    loading ? 'Marking…' : 'Mark Attendance',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 17,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SessionInfoCard extends StatelessWidget {
+  const _SessionInfoCard({
+    required this.startedLabel,
+    required this.purple,
+  });
+
+  final String startedLabel;
+  final Color purple;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.event_note_rounded, color: purple),
+              const SizedBox(width: 8),
+              Text(
+                'Session Info',
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 15,
+                  color: Colors.grey.shade900,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Icon(Icons.schedule_rounded, size: 20, color: Colors.grey.shade600),
+              const SizedBox(width: 8),
+              Text(
+                'Started at',
+                style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
+              ),
+              const Spacer(),
+              Text(
+                startedLabel,
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                  color: Colors.grey.shade900,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

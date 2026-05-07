@@ -97,17 +97,26 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
         ],
       ),
     );
-    if (ok != true) return;
-    await _db.clearStudentHistory(widget.studentId);
-    if (!mounted) return;
-    setState(() {
-      _history = [];
-      _subjectFilter = null;
-      _dateRange = null;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('History cleared.')),
-    );
+    if (ok != true || !mounted) return;
+    try {
+      await _db.clearStudentHistory(widget.studentId);
+      if (!mounted) return;
+      setState(() {
+        _subjectFilter = null;
+        _dateRange = null;
+      });
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('History cleared.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not clear history: $e')),
+      );
+      await _load();
+    }
   }
 
   @override
@@ -160,17 +169,29 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                       child: DropdownButtonFormField<String>(
-                        initialValue: _subjectFilter,
-                        decoration: const InputDecoration(labelText: 'Subject'),
+                        value: _subjectFilter ?? '',
+                        decoration:
+                            const InputDecoration(labelText: 'Subject'),
+                        isExpanded: true,
                         items: [
-                          const DropdownMenuItem<String>(value: '', child: Text('All')),
+                          const DropdownMenuItem<String>(
+                            value: '',
+                            child: Text('All'),
+                          ),
                           ..._history
                               .map((e) => e.subjectCode)
                               .toSet()
-                              .toList()
-                              .map((code) => DropdownMenuItem(value: code, child: Text(code))),
+                              .map(
+                                (code) => DropdownMenuItem(
+                                  value: code,
+                                  child: Text(code),
+                                ),
+                              ),
                         ],
-                        onChanged: (v) => setState(() => _subjectFilter = (v == null || v.isEmpty) ? null : v),
+                        onChanged: (v) => setState(
+                          () => _subjectFilter =
+                              (v == null || v.isEmpty) ? null : v,
+                        ),
                       ),
                     ),
                     if (_dateRange != null)

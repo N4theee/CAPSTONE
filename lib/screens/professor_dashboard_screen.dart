@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
-import 'professor_history_screen.dart';
 import '../services/supabase_service.dart';
-import 'professor_screen.dart';
+import '../ui/responsive.dart';
+import '../widgets/course_dashboard_card.dart';
 import 'home_screen.dart';
+import 'professor_history_screen.dart';
+import 'professor_screen.dart';
 
 class ProfessorDashboardScreen extends StatefulWidget {
   const ProfessorDashboardScreen({super.key, required this.user});
@@ -11,14 +13,21 @@ class ProfessorDashboardScreen extends StatefulWidget {
   final AppUser user;
 
   @override
-  State<ProfessorDashboardScreen> createState() => _ProfessorDashboardScreenState();
+  State<ProfessorDashboardScreen> createState() =>
+      _ProfessorDashboardScreenState();
 }
 
 class _ProfessorDashboardScreenState extends State<ProfessorDashboardScreen> {
   final _db = SupabaseService();
   bool _loading = true;
   List<SubjectOffering> _offerings = [];
+  Map<String, int> _enrollmentByOffering = {};
   late String _displayName;
+
+  static const _gradientTop = Color(0xFF3B5BDB);
+  static const _gradientBottom = Color(0xFF5B21B6);
+  static const _cardTop = Color(0xFF7C3AED);
+  static const _cardTopBorder = Color(0xFFA78BFA);
 
   @override
   void initState() {
@@ -29,9 +38,13 @@ class _ProfessorDashboardScreenState extends State<ProfessorDashboardScreen> {
 
   Future<void> _load() async {
     final rows = await _db.getProfessorOfferings(widget.user.linkedId);
+    final counts = await _db.getEnrollmentCountsForOfferings(
+      rows.map((e) => e.id).toList(),
+    );
     if (mounted) {
       setState(() {
         _offerings = rows;
+        _enrollmentByOffering = counts;
         _loading = false;
       });
     }
@@ -72,70 +85,237 @@ class _ProfessorDashboardScreenState extends State<ProfessorDashboardScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Professor Dashboard - $_displayName'),
-        actions: [
-          IconButton(
-            tooltip: 'Edit Name',
-            icon: const Icon(Icons.edit),
-            onPressed: _editName,
+  void _signOut() {
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const HomeScreen()),
+      (_) => false,
+    );
+  }
+
+  void _openHistory() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            ProfessorHistoryScreen(professorId: widget.user.linkedId),
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    final iconColor = Colors.white.withValues(alpha: 0.95);
+    final compact = AppBreakpoints.useCompactDashboardActions(context);
+
+    final brand = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.wifi_tethering, color: iconColor, size: 26),
+        const SizedBox(width: 8),
+        Flexible(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: const Text(
+              'Attendximitty',
+              maxLines: 1,
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 20,
+                letterSpacing: -0.5,
+              ),
+            ),
           ),
-          IconButton(
-            tooltip: 'Session History',
-            icon: const Icon(Icons.history),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) =>
-                      ProfessorHistoryScreen(professorId: widget.user.linkedId),
-                ),
-              );
+        ),
+      ],
+    );
+
+    if (compact) {
+      return Row(
+        children: [
+          Expanded(child: brand),
+          PopupMenuButton<String>(
+            icon: Icon(Icons.more_vert_rounded, color: iconColor),
+            color: const Color.fromARGB(255, 111, 105, 196),
+            onSelected: (v) {
+              if (v == 'edit') {
+                _editName();
+              } else if (v == 'refresh' && !_loading) {
+                _load();
+              } else if (v == 'history') {
+                _openHistory();
+              } else if (v == 'logout') {
+                _signOut();
+              }
             },
-          ),
-          IconButton(
-            tooltip: 'Sign out',
-            icon: const Icon(Icons.logout),
-            onPressed: () {
-              Navigator.pushAndRemoveUntil(
-                context,
-                MaterialPageRoute(builder: (_) => const HomeScreen()),
-                (_) => false,
-              );
-            },
+            itemBuilder: (ctx) => [
+              const PopupMenuItem(value: 'edit', child: Text('Edit name')),
+              PopupMenuItem(
+                value: 'refresh',
+                enabled: !_loading,
+                child: const Text('Refresh'),
+              ),
+              const PopupMenuItem(
+                value: 'history',
+                child: Text('Session history'),
+              ),
+              const PopupMenuItem(value: 'logout', child: Text('Sign out')),
+            ],
           ),
         ],
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: _offerings.length,
-              itemBuilder: (_, i) {
-                final o = _offerings[i];
-                return Card(
-                  child: ListTile(
-                    title: Text('${o.subjectCode} - ${o.subjectTitle}'),
-                    subtitle: Text('Section ${o.section}'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => ProfessorScreen(
-                            professorName: _displayName,
-                            offering: o,
-                          ),
-                        ),
-                      );
-                    },
+      );
+    }
+
+    return Row(
+      children: [
+        Expanded(child: brand),
+        IconButton(
+          tooltip: 'Edit Name',
+          onPressed: _editName,
+          icon: Icon(Icons.edit_outlined, color: iconColor),
+        ),
+        IconButton(
+          tooltip: 'Refresh',
+          onPressed: _loading ? null : _load,
+          icon: Icon(Icons.refresh_rounded, color: iconColor),
+        ),
+        IconButton(
+          tooltip: 'Session History',
+          onPressed: _openHistory,
+          icon: Icon(Icons.history_rounded, color: iconColor),
+        ),
+        IconButton(
+          tooltip: 'Sign out',
+          onPressed: _signOut,
+          icon: Icon(Icons.logout_rounded, color: iconColor),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pad = AppBreakpoints.horizontalPadding(context);
+    final cols = AppBreakpoints.courseGridColumns(context);
+    final aspect = AppBreakpoints.courseGridChildAspectRatio(context, cols);
+    final w = AppBreakpoints.width(context);
+    final markSize = (w * 0.28).clamp(72.0, 120.0);
+
+    return Scaffold(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [_gradientTop, _gradientBottom],
+          ),
+        ),
+        child: SafeArea(
+          child: Stack(
+            children: [
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: -20,
+                child: IgnorePointer(
+                  child: Text(
+                    'ATX',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: markSize,
+                      fontWeight: FontWeight.w900,
+                      height: 0.85,
+                      color: Colors.white.withValues(alpha: 0.07),
+                    ),
                   ),
-                );
-              },
-            ),
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding:
+                        EdgeInsets.symmetric(horizontal: pad, vertical: 8),
+                    child: _buildHeader(),
+                  ),
+                  Expanded(
+                    child: _loading
+                        ? const Center(
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                            ),
+                          )
+                        : RefreshIndicator(
+                            color: _gradientTop,
+                            onRefresh: _load,
+                            child: _offerings.isEmpty
+                                ? ListView(
+                                    physics:
+                                        const AlwaysScrollableScrollPhysics(),
+                                    children: const [
+                                      SizedBox(height: 120),
+                                      Center(
+                                        child: Text(
+                                          'No courses yet.',
+                                          style: TextStyle(
+                                            color: Colors.white70,
+                                            fontSize: 16,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                : GridView.builder(
+                                    padding: EdgeInsets.fromLTRB(
+                                        pad, 8, pad, 32),
+                                    physics:
+                                        const AlwaysScrollableScrollPhysics(),
+                                    gridDelegate:
+                                        SliverGridDelegateWithFixedCrossAxisCount(
+                                      crossAxisCount: cols,
+                                      mainAxisSpacing: 14,
+                                      crossAxisSpacing: 14,
+                                      childAspectRatio: aspect,
+                                    ),
+                                    itemCount: _offerings.length,
+                                    itemBuilder: (_, i) {
+                                      final o = _offerings[i];
+                                      final n =
+                                          _enrollmentByOffering[o.id] ?? 0;
+                                      return CourseDashboardCard(
+                                        title:
+                                            '${o.subjectCode} - ${o.subjectTitle}',
+                                        sectionLine: 'Section ${o.section}',
+                                        footerLine:
+                                            '$n ${n == 1 ? 'student' : 'students'}',
+                                        cardTop: _cardTop,
+                                        cardTopBorder: _cardTopBorder,
+                                        footerBar: Colors.black,
+                                        footerText: Colors.white,
+                                        chevron: Colors.white,
+                                        onTap: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) => ProfessorScreen(
+                                                professorName: _displayName,
+                                                offering: o,
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                      );
+                                    },
+                                  ),
+                          ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

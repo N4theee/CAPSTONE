@@ -358,6 +358,9 @@ class SupabaseService {
   Future<List<AdminAttendanceReportItem>> getAdminAttendanceReport({
     DateTime? from,
     DateTime? to,
+    String? professorId,
+    String? subjectCode,
+    String? section,
   }) async {
     var query = _db.from('attendance').select(
           'session_id, student_id, student_name, marked_at, '
@@ -372,6 +375,18 @@ class SupabaseService {
     }
     if (to != null) {
       query = query.lte('marked_at', to.toUtc().toIso8601String());
+    }
+    if (professorId != null && professorId.trim().isNotEmpty) {
+      query = query.eq('sessions.professor_id', professorId.trim());
+    }
+    if (subjectCode != null && subjectCode.trim().isNotEmpty) {
+      query = query.eq(
+        'sessions.subject_offerings.subject_code',
+        subjectCode.trim(),
+      );
+    }
+    if (section != null && section.trim().isNotEmpty) {
+      query = query.eq('sessions.subject_offerings.section', section.trim());
     }
 
     final rows = await query.order('marked_at', ascending: false);
@@ -436,6 +451,22 @@ class SupabaseService {
         .eq('professor_id', professorId)
         .order('subject_code');
     return rows.map(_offeringFromSelect).toList();
+  }
+
+  /// Enrollment counts per offering (for dashboard cards).
+  Future<Map<String, int>> getEnrollmentCountsForOfferings(
+      List<String> offeringIds) async {
+    if (offeringIds.isEmpty) return {};
+    final rows = await _db
+        .from('student_subject_enrollments')
+        .select('offering_id')
+        .inFilter('offering_id', offeringIds);
+    final map = {for (final id in offeringIds) id: 0};
+    for (final r in rows) {
+      final id = r['offering_id'] as String;
+      map[id] = (map[id] ?? 0) + 1;
+    }
+    return map;
   }
 
   SubjectOffering _offeringFromMap(Map<String, dynamic> e) {
@@ -694,10 +725,53 @@ class SupabaseService {
   }
 
   Future<void> clearProfessorHistory(String professorId) async {
-    await _db.rpc(
-      'clear_professor_history',
-      params: {'p_professor_id': professorId.trim()},
-    );
+    final id = professorId.trim();
+    try {
+      await _db.rpc(
+        'clear_professor_history',
+        params: {'p_professor_id': id},
+      );
+      return;
+    } on PostgrestException catch (e) {
+      if (e.code != 'PGRST202') rethrow;
+    }
+
+    // Backward-compat: some deployments used a different RPC name.
+    try {
+      await _db.rpc(
+        'clear_professor_session_history',
+        params: {'p_professor_id': id},
+      );
+      return;
+    } on PostgrestException catch (e) {
+      if (e.code != 'PGRST202') rethrow;
+    }
+
+    // Final fallback: direct delete (RLS allows deletes).
+    // Must delete attendance first to satisfy FK attendance.session_id -> sessions.id
+    final rawSessions = await _db
+        .from('sessions')
+        .select('id')
+        .eq('professor_id', id);
+
+    final rows =
+        (rawSessions is List) ? rawSessions.cast<Map<String, dynamic>>() : const <Map<String, dynamic>>[];
+    final ids = rows
+        .map((e) => e['id'])
+        .whereType<String>()
+        .where((s) => s.isNotEmpty)
+        .toList();
+
+    const chunkSize = 100;
+    for (var i = 0; i < ids.length; i += chunkSize) {
+      final chunk = ids.sublist(
+        i,
+        (i + chunkSize) > ids.length ? ids.length : (i + chunkSize),
+      );
+      await _db.from('attendance').delete().inFilter('session_id', chunk);
+    }
+
+    await _db.from('sessions').delete().eq('professor_id', id);
   }
 
   Future<List<StudentAttendanceHistoryItem>> getStudentAttendanceHistory(
@@ -725,9 +799,18 @@ class SupabaseService {
   }
 
   Future<void> clearStudentHistory(String studentId) async {
-    await _db.rpc(
-      'clear_student_history',
-      params: {'p_student_id': studentId.trim()},
-    );
+    final id = studentId.trim();
+    try {
+      await _db.rpc(
+        'clear_student_history',
+        params: {'p_student_id': id},
+      );
+      return;
+    } on PostgrestException catch (e) {
+      if (e.code != 'PGRST202') rethrow;
+    }
+
+    // Final fallback: direct delete (RLS allows deletes).
+    await _db.from('attendance').delete().eq('student_id', id);
   }
 }

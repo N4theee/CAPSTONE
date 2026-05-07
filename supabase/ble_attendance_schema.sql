@@ -500,6 +500,8 @@ security definer
 set search_path = public
 as $$
 begin
+  -- Ensure deletes succeed when RLS is enabled (function runs as definer).
+  perform set_config('row_security', 'off', true);
   delete from public.sessions
   where professor_id = trim(p_professor_id);
 end;
@@ -514,6 +516,7 @@ security definer
 set search_path = public
 as $$
 begin
+  perform set_config('row_security', 'off', true);
   delete from public.attendance
   where student_id = trim(p_student_id);
 end;
@@ -569,11 +572,17 @@ create policy "open insert sessions" on public.sessions for insert to anon with 
 drop policy if exists "open update sessions" on public.sessions;
 create policy "open update sessions" on public.sessions for update to anon using (true) with check (true);
 
+drop policy if exists "open delete sessions" on public.sessions;
+create policy "open delete sessions" on public.sessions for delete to anon using (true);
+
 drop policy if exists "open read attendance" on public.attendance;
 create policy "open read attendance" on public.attendance for select to anon using (true);
 
 drop policy if exists "open insert attendance" on public.attendance;
 create policy "open insert attendance" on public.attendance for insert to anon with check (true);
+
+drop policy if exists "open delete attendance" on public.attendance;
+create policy "open delete attendance" on public.attendance for delete to anon using (true);
 
 drop policy if exists "deny direct app users select" on public.app_users;
 create policy "deny direct app users select" on public.app_users for select to anon using (false);

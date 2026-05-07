@@ -101,18 +101,27 @@ class _ProfessorHistoryScreenState extends State<ProfessorHistoryScreen> {
         ],
       ),
     );
-    if (ok != true) return;
-    await _db.clearProfessorHistory(widget.professorId);
-    if (!mounted) return;
-    setState(() {
-      _history = [];
-      _subjectFilter = null;
-      _sectionFilter = null;
-      _dateRange = null;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('History cleared.')),
-    );
+    if (ok != true || !mounted) return;
+    try {
+      await _db.clearProfessorHistory(widget.professorId);
+      if (!mounted) return;
+      setState(() {
+        _subjectFilter = null;
+        _sectionFilter = null;
+        _dateRange = null;
+      });
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('History cleared.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not clear history: $e')),
+      );
+      await _load();
+    }
   }
 
   @override
@@ -162,43 +171,78 @@ class _ProfessorHistoryScreenState extends State<ProfessorHistoryScreen> {
                 )
               : Column(
                   children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: DropdownButtonFormField<String>(
-                              initialValue: _subjectFilter,
-                              decoration: const InputDecoration(labelText: 'Subject'),
-                              items: [
-                                const DropdownMenuItem<String>(value: '', child: Text('All')),
-                                ..._history
-                                    .map((e) => e.subjectCode)
-                                    .toSet()
-                                    .toList()
-                                    .map((code) => DropdownMenuItem(value: code, child: Text(code))),
-                              ],
-                              onChanged: (v) => setState(() => _subjectFilter = (v == null || v.isEmpty) ? null : v),
+                    LayoutBuilder(
+                      builder: (context, c) {
+                        final narrow = c.maxWidth < 480;
+                        final subjectField = DropdownButtonFormField<String>(
+                          value: _subjectFilter ?? '',
+                          decoration:
+                              const InputDecoration(labelText: 'Subject'),
+                          isExpanded: true,
+                          items: [
+                            const DropdownMenuItem<String>(
+                              value: '',
+                              child: Text('All'),
                             ),
+                            ..._history
+                                .map((e) => e.subjectCode)
+                                .toSet()
+                                .map(
+                                  (code) => DropdownMenuItem(
+                                    value: code,
+                                    child: Text(code),
+                                  ),
+                                ),
+                          ],
+                          onChanged: (v) => setState(
+                            () => _subjectFilter =
+                                (v == null || v.isEmpty) ? null : v,
                           ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: DropdownButtonFormField<String>(
-                              initialValue: _sectionFilter,
-                              decoration: const InputDecoration(labelText: 'Section'),
-                              items: [
-                                const DropdownMenuItem<String>(value: '', child: Text('All')),
-                                ..._history
-                                    .map((e) => e.section)
-                                    .toSet()
-                                    .toList()
-                                    .map((section) => DropdownMenuItem(value: section, child: Text(section))),
-                              ],
-                              onChanged: (v) => setState(() => _sectionFilter = (v == null || v.isEmpty) ? null : v),
+                        );
+                        final sectionField = DropdownButtonFormField<String>(
+                          value: _sectionFilter ?? '',
+                          decoration:
+                              const InputDecoration(labelText: 'Section'),
+                          isExpanded: true,
+                          items: [
+                            const DropdownMenuItem<String>(
+                              value: '',
+                              child: Text('All'),
                             ),
+                            ..._history
+                                .map((e) => e.section)
+                                .toSet()
+                                .map(
+                                  (section) => DropdownMenuItem(
+                                    value: section,
+                                    child: Text(section),
+                                  ),
+                                ),
+                          ],
+                          onChanged: (v) => setState(
+                            () => _sectionFilter =
+                                (v == null || v.isEmpty) ? null : v,
                           ),
-                        ],
-                      ),
+                        );
+                        return Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                          child: narrow
+                              ? Column(
+                                  children: [
+                                    subjectField,
+                                    const SizedBox(height: 12),
+                                    sectionField,
+                                  ],
+                                )
+                              : Row(
+                                  children: [
+                                    Expanded(child: subjectField),
+                                    const SizedBox(width: 10),
+                                    Expanded(child: sectionField),
+                                  ],
+                                ),
+                        );
+                      },
                     ),
                     if (_dateRange != null)
                       Padding(
@@ -230,7 +274,10 @@ class _ProfessorHistoryScreenState extends State<ProfessorHistoryScreen> {
                         ),
                         isThreeLine: true,
                         trailing: Chip(
-                          label: Text(item.isActive ? 'Active' : 'Done'),
+                          label: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(item.isActive ? 'Active' : 'Done'),
+                          ),
                         ),
                       ),
                     );
