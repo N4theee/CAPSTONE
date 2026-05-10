@@ -61,6 +61,7 @@ class ProfessorBasic {
 
 class ProfessorSessionHistoryItem {
   const ProfessorSessionHistoryItem({
+    required this.sessionId,
     required this.subjectCode,
     required this.subjectTitle,
     required this.section,
@@ -69,12 +70,27 @@ class ProfessorSessionHistoryItem {
     required this.isActive,
   });
 
+  final String sessionId;
   final String subjectCode;
   final String subjectTitle;
   final String section;
   final DateTime startedAt;
   final DateTime? endedAt;
   final bool isActive;
+}
+
+class SessionAttendanceDetailItem {
+  const SessionAttendanceDetailItem({
+    required this.studentId,
+    required this.studentName,
+    required this.markedAt,
+    required this.deviceUsed,
+  });
+
+  final String studentId;
+  final String studentName;
+  final DateTime markedAt;
+  final String deviceUsed;
 }
 
 class StudentAttendanceHistoryItem {
@@ -133,6 +149,9 @@ class AdminAttendanceReportItem {
     required this.studentId,
     required this.studentName,
     required this.markedAt,
+    required this.deviceName,
+    required this.deviceMac,
+    required this.deviceFingerprint,
   });
 
   final String sessionId;
@@ -146,6 +165,19 @@ class AdminAttendanceReportItem {
   final String studentId;
   final String studentName;
   final DateTime markedAt;
+  final String? deviceName;
+  final String? deviceMac;
+  final String? deviceFingerprint;
+}
+
+class AttendanceAnomaly {
+  const AttendanceAnomaly({
+    required this.deviceLabel,
+    required this.students,
+  });
+
+  final String deviceLabel;
+  final List<String> students;
 }
 
 class SessionNotificationItem {
@@ -364,6 +396,7 @@ class SupabaseService {
   }) async {
     var query = _db.from('attendance').select(
           'session_id, student_id, student_name, marked_at, '
+          'device_name, device_mac, device_fingerprint, '
           'sessions!attendance_session_id_fkey(id, started_at, ended_at, '
           'offering_id, professor_id, '
           'subject_offerings!sessions_offering_id_fkey(subject_code, subject_title, section, professor_id, '
@@ -391,7 +424,7 @@ class SupabaseService {
 
     final rows = await query.order('marked_at', ascending: false);
     return rows.map((row) {
-      final map = row as Map<String, dynamic>;
+      final map = row;
       final session = map['sessions'] as Map<String, dynamic>? ?? {};
       final offering =
           session['subject_offerings'] as Map<String, dynamic>? ?? {};
@@ -413,6 +446,9 @@ class SupabaseService {
         studentId: (map['student_id'] as String?) ?? '',
         studentName: (map['student_name'] as String?) ?? 'Student',
         markedAt: DateTime.parse(map['marked_at'] as String).toLocal(),
+        deviceName: map['device_name'] as String?,
+        deviceMac: map['device_mac'] as String?,
+        deviceFingerprint: map['device_fingerprint'] as String?,
       );
     }).toList();
   }
@@ -615,17 +651,44 @@ class SupabaseService {
     required String sessionId,
     required String studentId,
     required String studentName,
+    String? deviceName,
+    String? deviceMac,
+    String? deviceFingerprint,
   }) async {
     try {
-      await _db.from('attendance').insert({
+      final payload = <String, dynamic>{
         'session_id': sessionId,
         'student_id': studentId,
         'student_name': studentName,
         'marked_at': DateTime.now().toIso8601String(),
-      });
+      };
+      if (deviceName != null && deviceName.trim().isNotEmpty) {
+        payload['device_name'] = deviceName.trim();
+      }
+      if (deviceMac != null && deviceMac.trim().isNotEmpty) {
+        payload['device_mac'] = deviceMac.trim();
+      }
+      if (deviceFingerprint != null && deviceFingerprint.trim().isNotEmpty) {
+        payload['device_fingerprint'] = deviceFingerprint.trim();
+      }
+
+      await _db.from('attendance').insert(payload);
       debugPrint('[DB] Attendance marked for $studentName');
       return true;
     } on PostgrestException catch (e) {
+      if (e.code == 'PGRST204' &&
+          (e.message.contains('device_name') ||
+              e.message.contains('device_mac') ||
+              e.message.contains('device_fingerprint'))) {
+        await _db.from('attendance').insert({
+          'session_id': sessionId,
+          'student_id': studentId,
+          'student_name': studentName,
+          'marked_at': DateTime.now().toIso8601String(),
+        });
+        debugPrint('[DB] Attendance marked for $studentName (legacy schema)');
+        return true;
+      }
       if (e.code == '23505') {
         debugPrint('[DB] Already marked!');
         return false;
@@ -640,6 +703,48 @@ class SupabaseService {
         .select()
         .eq('session_id', sessionId)
         .order('marked_at');
+  }
+
+  List<AttendanceAnomaly> detectSharedDeviceAnomalies(
+    List<Map<String, dynamic>> attendees,
+  ) {
+    final buckets = <String, Set<String>>{};
+    final labels = <String, String>{};
+
+    for (final row in attendees) {
+      final fingerprint = (row['device_fingerprint'] as String?)?.trim();
+      if (fingerprint == null || fingerprint.isEmpty) continue;
+
+      final studentName =
+          ((row['student_name'] as String?)?.trim().isNotEmpty ?? false)
+              ? (row['student_name'] as String).trim()
+              : ((row['student_id'] as String?) ?? 'Unknown student');
+      final deviceName = (row['device_name'] as String?)?.trim();
+      final deviceMac = (row['device_mac'] as String?)?.trim();
+      final label = (deviceName != null && deviceName.isNotEmpty)
+          ? deviceName
+          : ((deviceMac != null && deviceMac.isNotEmpty)
+              ? deviceMac
+              : 'Unknown device');
+
+      buckets.putIfAbsent(fingerprint, () => <String>{}).add(studentName);
+      labels.putIfAbsent(fingerprint, () => label);
+    }
+
+    final anomalies = <AttendanceAnomaly>[];
+    buckets.forEach((fingerprint, students) {
+      if (students.length < 2) return;
+      final sortedStudents = students.toList()..sort();
+      anomalies.add(
+        AttendanceAnomaly(
+          deviceLabel: labels[fingerprint] ?? 'Unknown device',
+          students: sortedStudents,
+        ),
+      );
+    });
+
+    anomalies.sort((a, b) => b.students.length.compareTo(a.students.length));
+    return anomalies;
   }
 
   // Realtime stream — fires whenever session row changes
@@ -712,6 +817,7 @@ class SupabaseService {
     return rows.map((row) {
       final map = row as Map<String, dynamic>;
       return ProfessorSessionHistoryItem(
+        sessionId: (map['session_id'] as String?) ?? '',
         subjectCode: (map['subject_code'] as String?) ?? 'SUBJECT',
         subjectTitle: (map['subject_title'] as String?) ?? 'Untitled',
         section: (map['section'] as String?) ?? 'N/A',
@@ -722,6 +828,70 @@ class SupabaseService {
         isActive: (map['is_active'] as bool?) ?? false,
       );
     }).toList();
+  }
+
+  Future<List<SessionAttendanceDetailItem>> getSessionAttendeesForProfessor({
+    required String professorId,
+    required String sessionId,
+  }) async {
+    try {
+      final rows = await _db.rpc(
+        'get_professor_session_attendees',
+        params: {
+          'p_professor_id': professorId.trim(),
+          'p_session_id': sessionId,
+        },
+      );
+      if (rows is! List) return [];
+
+      return rows.map((row) {
+        final map = row as Map<String, dynamic>;
+        return SessionAttendanceDetailItem(
+          studentId: (map['student_id'] as String?) ?? '',
+          studentName: (map['student_name'] as String?) ?? 'Student',
+          markedAt: DateTime.parse(map['marked_at'] as String).toLocal(),
+          deviceUsed: ((map['device_used'] as String?)?.trim().isNotEmpty ?? false)
+              ? (map['device_used'] as String).trim()
+              : 'Unknown device',
+        );
+      }).toList();
+    } on PostgrestException catch (e) {
+      if (e.code != 'PGRST202') rethrow;
+
+      // Fallback for deployments where RPC is not yet created.
+      final rows = await _db
+          .from('attendance')
+          .select('student_id, student_name, marked_at, device_name, device_fingerprint')
+          .eq('session_id', sessionId)
+          .order('marked_at');
+
+      return rows.map((map) {
+        final deviceName = (map['device_name'] as String?)?.trim();
+        final fp = (map['device_fingerprint'] as String?)?.trim();
+        final deviceUsed = (deviceName != null && deviceName.isNotEmpty)
+            ? deviceName
+            : ((fp != null && fp.isNotEmpty) ? fp : 'Unknown device');
+        return SessionAttendanceDetailItem(
+          studentId: (map['student_id'] as String?) ?? '',
+          studentName: (map['student_name'] as String?) ?? 'Student',
+          markedAt: DateTime.parse(map['marked_at'] as String).toLocal(),
+          deviceUsed: deviceUsed,
+        );
+      }).toList();
+    }
+  }
+
+  Future<bool> hasStudentMarkedAttendance({
+    required String sessionId,
+    required String studentId,
+  }) async {
+    final rows = await _db
+        .from('attendance')
+        .select('id')
+        .eq('session_id', sessionId)
+        .eq('student_id', studentId)
+        .limit(1);
+    return rows.isNotEmpty;
   }
 
   Future<void> clearProfessorHistory(String professorId) async {
@@ -754,8 +924,7 @@ class SupabaseService {
         .select('id')
         .eq('professor_id', id);
 
-    final rows =
-        (rawSessions is List) ? rawSessions.cast<Map<String, dynamic>>() : const <Map<String, dynamic>>[];
+    final rows = rawSessions.cast<Map<String, dynamic>>();
     final ids = rows
         .map((e) => e['id'])
         .whereType<String>()

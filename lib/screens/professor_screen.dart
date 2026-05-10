@@ -30,6 +30,7 @@ class _ProfessorScreenState extends State<ProfessorScreen>
   bool _loading = false;
   String? _sessionId;
   List<Map<String, dynamic>> _attendees = [];
+  List<AttendanceAnomaly> _anomalies = const [];
   Timer? _pollTimer;
 
   late AnimationController _radarController;
@@ -109,7 +110,12 @@ class _ProfessorScreenState extends State<ProfessorScreen>
   Future<void> _refresh() async {
     if (_sessionId == null) return;
     final list = await _db.getAttendees(_sessionId!);
-    if (mounted) setState(() => _attendees = list);
+    if (mounted) {
+      setState(() {
+        _attendees = list;
+        _anomalies = _db.detectSharedDeviceAnomalies(list);
+      });
+    }
   }
 
   void _toast(String msg) => ScaffoldMessenger.of(context)
@@ -333,6 +339,7 @@ class _ProfessorScreenState extends State<ProfessorScreen>
               accent: _accent,
               active: _active,
               attendees: _attendees,
+              anomalies: _anomalies,
             ),
             const SizedBox(height: 16),
             _HowItWorksCard(card: _card, accent: _accent),
@@ -735,7 +742,6 @@ class _RadarPainter extends CustomPainter {
 
     final rnd = math.Random(42);
     for (var i = 0; i < dotCount; i++) {
-      final t = (i + 1) / (dotCount + 1);
       final ang = rnd.nextDouble() * math.pi * 2;
       final rad = maxR * (0.35 + rnd.nextDouble() * 0.55);
       final p = c + Offset(math.cos(ang), math.sin(ang)) * rad;
@@ -765,6 +771,7 @@ class _AttendeesExpansion extends StatelessWidget {
     required this.accent,
     required this.active,
     required this.attendees,
+    required this.anomalies,
   });
 
   final int count;
@@ -772,6 +779,7 @@ class _AttendeesExpansion extends StatelessWidget {
   final Color accent;
   final bool active;
   final List<Map<String, dynamic>> attendees;
+  final List<AttendanceAnomaly> anomalies;
 
   @override
   Widget build(BuildContext context) {
@@ -823,6 +831,38 @@ class _AttendeesExpansion extends StatelessWidget {
           ],
         ),
         children: [
+          if (anomalies.isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+              child: Column(
+                children: anomalies
+                    .map(
+                      (a) => Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF7F1D1D).withValues(alpha: 0.22),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: const Color(0xFFFCA5A5).withValues(alpha: 0.5),
+                          ),
+                        ),
+                        child: Text(
+                          'Anomaly detected: ${a.students.join(' and ')} used the same device (${a.deviceLabel}).',
+                          style: const TextStyle(
+                            color: Color(0xFFFECACA),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ),
+          ],
           if (!active)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -845,7 +885,7 @@ class _AttendeesExpansion extends StatelessWidget {
               physics: const NeverScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
               itemCount: attendees.length,
-              separatorBuilder: (_, __) => Divider(
+              separatorBuilder: (_, _) => Divider(
                 height: 1,
                 color: Colors.white.withValues(alpha: 0.06),
               ),
@@ -869,7 +909,14 @@ class _AttendeesExpansion extends StatelessWidget {
                     style: const TextStyle(color: Colors.white),
                   ),
                   subtitle: Text(
-                    '${a['student_id']}',
+                    [
+                      '${a['student_id']}',
+                      if ((a['device_name'] as String?)?.trim().isNotEmpty ?? false)
+                        'Device used: ${a['device_name']}',
+                      if (!((a['device_name'] as String?)?.trim().isNotEmpty ?? false) &&
+                          ((a['device_fingerprint'] as String?)?.trim().isNotEmpty ?? false))
+                        'Device used: ${(a['device_fingerprint'] as String).trim()}',
+                    ].join('\n'),
                     style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.45),
                     ),

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -147,6 +146,14 @@ class _StudentScreenState extends State<StudentScreen>
           setState(() => _sessionStartedAt = started);
           _syncUiClock();
         }
+
+        final alreadyMarked = await _db.hasStudentMarkedAttendance(
+          sessionId: newId,
+          studentId: widget.studentId,
+        );
+        if (mounted && _attended != alreadyMarked) {
+          setState(() => _attended = alreadyMarked);
+        }
       } else {
         if (_sessionActive) {
           _ble.stopProximityScanning();
@@ -188,18 +195,22 @@ class _StudentScreenState extends State<StudentScreen>
     setState(() => _loading = true);
 
     try {
+      final deviceInfo = await _ble.getAttendanceDeviceInfo();
       final ok = await _db.markAttendance(
         sessionId: _sessionId!,
         studentId: widget.studentId,
         studentName: widget.studentName,
+        deviceName: deviceInfo.deviceName,
+        deviceMac: deviceInfo.deviceMac,
+        deviceFingerprint: deviceInfo.deviceFingerprint,
       );
 
       setState(() {
-        _attended = ok;
+        _attended = true;
         _loading = false;
       });
 
-      _toast(ok ? 'Attendance marked!' : 'Already marked');
+      _toast(ok ? 'Attendance marked!' : 'Attendance already marked');
     } catch (e) {
       setState(() => _loading = false);
       _toast('Error: $e');

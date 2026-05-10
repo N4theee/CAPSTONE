@@ -124,6 +124,87 @@ class _ProfessorHistoryScreenState extends State<ProfessorHistoryScreen> {
     }
   }
 
+  Future<void> _openSessionAttendees(ProfessorSessionHistoryItem item) async {
+    if (item.sessionId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Session details unavailable for this record.')),
+      );
+      return;
+    }
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: SizedBox(
+            height: MediaQuery.of(ctx).size.height * 0.72,
+            child: FutureBuilder<List<SessionAttendanceDetailItem>>(
+              future: _db.getSessionAttendeesForProfessor(
+                professorId: widget.professorId,
+                sessionId: item.sessionId,
+              ),
+              builder: (context, snap) {
+                if (snap.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snap.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text('Failed to load attendees: ${snap.error}'),
+                    ),
+                  );
+                }
+                final attendees = snap.data ?? const [];
+                if (attendees.isEmpty) {
+                  return const Center(
+                    child: Text('No students attended this session.'),
+                  );
+                }
+                return Column(
+                  children: [
+                    ListTile(
+                      title: Text('${item.subjectCode} • Section ${item.section}'),
+                      subtitle: const Text('Students attended in this session'),
+                    ),
+                    const Divider(height: 1),
+                    Expanded(
+                      child: ListView.separated(
+                        itemCount: attendees.length,
+                        separatorBuilder: (_, _) => const Divider(height: 1),
+                        itemBuilder: (_, i) {
+                          final a = attendees[i];
+                          final hh = a.markedAt.hour.toString().padLeft(2, '0');
+                          final mm = a.markedAt.minute.toString().padLeft(2, '0');
+                          return ListTile(
+                            leading: CircleAvatar(
+                              child: Text(
+                                a.studentName.isEmpty
+                                    ? '?'
+                                    : a.studentName[0].toUpperCase(),
+                              ),
+                            ),
+                            title: Text(a.studentName),
+                            subtitle: Text(
+                              '${a.studentId}\nDevice used: ${a.deviceUsed}',
+                            ),
+                            isThreeLine: true,
+                            trailing: Text('$hh:$mm'),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -264,6 +345,7 @@ class _ProfessorHistoryScreenState extends State<ProfessorHistoryScreen> {
                     final item = _filteredHistory[i];
                     return Card(
                       child: ListTile(
+                        onTap: () => _openSessionAttendees(item),
                         title: Text(
                           '${item.subjectCode} - ${item.subjectTitle}',
                         ),

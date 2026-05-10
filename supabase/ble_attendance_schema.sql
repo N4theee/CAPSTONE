@@ -100,11 +100,26 @@ create table if not exists public.attendance (
   session_id uuid not null references public.sessions(id) on delete cascade,
   student_id text not null references public.students(id) on delete cascade,
   student_name text not null,
-  marked_at timestamptz not null default now()
+  marked_at timestamptz not null default now(),
+  device_name text,
+  device_mac text,
+  device_fingerprint text
 );
+
+-- Upgrade path for older attendance schemas without device metadata.
+alter table public.attendance
+  add column if not exists device_name text;
+alter table public.attendance
+  add column if not exists device_mac text;
+alter table public.attendance
+  add column if not exists device_fingerprint text;
 
 create unique index if not exists attendance_unique_session_student_idx
   on public.attendance (session_id, student_id);
+
+create index if not exists attendance_device_fingerprint_idx
+  on public.attendance (device_fingerprint)
+  where device_fingerprint is not null;
 
 -- ---------- FUNCTIONS ----------
 
@@ -435,6 +450,7 @@ create or replace function public.get_professor_session_history(
   p_professor_id text
 )
 returns table (
+  session_id uuid,
   subject_code text,
   subject_title text,
   section text,
@@ -447,6 +463,7 @@ security definer
 set search_path = public
 as $$
   select
+    s.id as session_id,
     so.subject_code,
     so.subject_title,
     so.section,
@@ -457,6 +474,32 @@ as $$
   join public.subject_offerings so on so.id = s.offering_id
   where s.professor_id = trim(p_professor_id)
   order by s.started_at desc;
+$$;
+
+create or replace function public.get_professor_session_attendees(
+  p_professor_id text,
+  p_session_id uuid
+)
+returns table (
+  student_id text,
+  student_name text,
+  marked_at timestamptz,
+  device_used text
+)
+language sql
+security definer
+set search_path = public
+as $$
+  select
+    a.student_id,
+    a.student_name,
+    a.marked_at,
+    coalesce(nullif(trim(a.device_name), ''), nullif(trim(a.device_fingerprint), ''), 'Unknown device') as device_used
+  from public.attendance a
+  join public.sessions s on s.id = a.session_id
+  where s.id = p_session_id
+    and s.professor_id = trim(p_professor_id)
+  order by a.marked_at asc;
 $$;
 
 create or replace function public.get_student_attendance_history(
@@ -530,6 +573,7 @@ grant execute on function public.admin_assign_student_to_offering(text, uuid) to
 grant execute on function public.get_admin_enrollments() to anon, authenticated;
 grant execute on function public.get_student_dashboard(text) to anon, authenticated;
 grant execute on function public.get_professor_session_history(text) to anon, authenticated;
+grant execute on function public.get_professor_session_attendees(text, uuid) to anon, authenticated;
 grant execute on function public.get_student_attendance_history(text) to anon, authenticated;
 grant execute on function public.update_display_name(text, text, text) to anon, authenticated;
 grant execute on function public.clear_professor_history(text) to anon, authenticated;

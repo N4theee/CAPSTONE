@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
@@ -8,6 +9,18 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../config.dart';
+
+class AttendanceDeviceInfo {
+  const AttendanceDeviceInfo({
+    required this.deviceName,
+    required this.deviceFingerprint,
+    this.deviceMac,
+  });
+
+  final String deviceName;
+  final String deviceFingerprint;
+  final String? deviceMac;
+}
 
 class BleService {
   static final BleService _i = BleService._();
@@ -83,6 +96,55 @@ class BleService {
     final state = await FlutterBluePlus.adapterState.first;
     debugPrint('[BLE] Adapter state: $state');
     return state == BluetoothAdapterState.on;
+  }
+
+  Future<AttendanceDeviceInfo> getAttendanceDeviceInfo() async {
+    if (kIsWeb) {
+      return const AttendanceDeviceInfo(
+        deviceName: 'Web Browser',
+        deviceFingerprint: 'web-browser',
+      );
+    }
+
+    final info = DeviceInfoPlugin();
+    if (Platform.isAndroid) {
+      final android = await info.androidInfo;
+      final model = android.model.trim().isEmpty ? 'Android Device' : android.model.trim();
+      final manufacturer = android.manufacturer.trim();
+      final hardwareKey = android.id.trim().isNotEmpty
+          ? android.id.trim()
+          : '${android.brand}-${android.device}-${android.product}';
+      final fingerprint =
+          'android:${manufacturer.toLowerCase()}:${model.toLowerCase()}:$hardwareKey';
+      final name = manufacturer.isNotEmpty ? '$manufacturer $model' : model;
+      return AttendanceDeviceInfo(
+        deviceName: name,
+        deviceFingerprint: fingerprint,
+      );
+    }
+
+    if (Platform.isIOS) {
+      final ios = await info.iosInfo;
+      final model = ios.utsname.machine.trim().isEmpty
+          ? 'iOS Device'
+          : ios.utsname.machine.trim();
+      final name = ios.name.trim().isEmpty ? model : ios.name.trim();
+      final fingerprint = 'ios:${ios.identifierForVendor ?? model}:$model';
+      return AttendanceDeviceInfo(
+        deviceName: name,
+        deviceFingerprint: fingerprint,
+      );
+    }
+
+    final fallback = await info.deviceInfo;
+    final data = fallback.data;
+    final machine = (data['model'] ?? data['machine'] ?? 'device').toString();
+    final os = (data['systemName'] ?? Platform.operatingSystem).toString();
+    final fingerprint = '$os:$machine';
+    return AttendanceDeviceInfo(
+      deviceName: machine,
+      deviceFingerprint: fingerprint,
+    );
   }
 
   // ── SCAN ALL NEARBY (setup helper) ────────────────────────────────────
