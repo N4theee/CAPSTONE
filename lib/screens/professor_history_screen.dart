@@ -139,11 +139,8 @@ class _ProfessorHistoryScreenState extends State<ProfessorHistoryScreen> {
         return SafeArea(
           child: SizedBox(
             height: MediaQuery.of(ctx).size.height * 0.72,
-            child: FutureBuilder<List<SessionAttendanceDetailItem>>(
-              future: _db.getSessionAttendeesForProfessor(
-                professorId: widget.professorId,
-                sessionId: item.sessionId,
-              ),
+            child: FutureBuilder<Map<String, dynamic>>(
+              future: _loadSessionDetails(item.sessionId),
               builder: (context, snap) {
                 if (snap.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -156,7 +153,12 @@ class _ProfessorHistoryScreenState extends State<ProfessorHistoryScreen> {
                     ),
                   );
                 }
-                final attendees = snap.data ?? const [];
+                final data = snap.data ?? const <String, dynamic>{};
+                final attendees =
+                    (data['attendees'] as List<SessionAttendanceDetailItem>?) ??
+                        const <SessionAttendanceDetailItem>[];
+                final anomalies = (data['anomalies'] as List<AttendanceAnomaly>?) ??
+                    const <AttendanceAnomaly>[];
                 if (attendees.isEmpty) {
                   return const Center(
                     child: Text('No students attended this session.'),
@@ -169,6 +171,26 @@ class _ProfessorHistoryScreenState extends State<ProfessorHistoryScreen> {
                       subtitle: const Text('Students attended in this session'),
                     ),
                     const Divider(height: 1),
+                    if (anomalies.isNotEmpty)
+                      Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.red.shade200),
+                        ),
+                        child: Text(
+                          'Anomaly detected: Same UUID-Device used by multiple students in this session.',
+                          style: TextStyle(
+                            color: Colors.red.shade900,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
                     Expanded(
                       child: ListView.separated(
                         itemCount: attendees.length,
@@ -203,6 +225,27 @@ class _ProfessorHistoryScreenState extends State<ProfessorHistoryScreen> {
         );
       },
     );
+  }
+
+  Future<Map<String, dynamic>> _loadSessionDetails(String sessionId) async {
+    final attendeesFuture = _db.getSessionAttendeesForProfessor(
+      professorId: widget.professorId,
+      sessionId: sessionId,
+    );
+    final anomaliesFuture = _db.getSessionDeviceAnomalies(sessionId);
+
+    final attendees = await attendeesFuture;
+    List<AttendanceAnomaly> anomalies;
+    try {
+      anomalies = await anomaliesFuture;
+    } catch (_) {
+      anomalies = const [];
+    }
+
+    return {
+      'attendees': attendees,
+      'anomalies': anomalies,
+    };
   }
 
   @override

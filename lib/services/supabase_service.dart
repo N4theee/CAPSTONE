@@ -173,10 +173,12 @@ class AdminAttendanceReportItem {
 class AttendanceAnomaly {
   const AttendanceAnomaly({
     required this.deviceLabel,
+    required this.deviceUuid,
     required this.students,
   });
 
   final String deviceLabel;
+  final String deviceUuid;
   final List<String> students;
 }
 
@@ -237,17 +239,33 @@ class SupabaseService {
     required String fullName,
     required String username,
     required String password,
+    String? deviceUuid,
+    String? deviceName,
   }) async {
-    final result = await _db.rpc(
-      'register_student',
-      params: {
-        'p_student_id': studentId.trim(),
-        'p_full_name': fullName.trim(),
-        'p_username': username.trim(),
-        'p_password': password.trim(),
-      },
-    );
-    return result as String;
+    final baseParams = {
+      'p_student_id': studentId.trim(),
+      'p_full_name': fullName.trim(),
+      'p_username': username.trim(),
+      'p_password': password.trim(),
+    };
+    try {
+      final result = await _db.rpc(
+        'register_student',
+        params: {
+          ...baseParams,
+          'p_device_uuid': deviceUuid,
+          'p_device_name': deviceName?.trim(),
+        },
+      );
+      return result as String;
+    } on PostgrestException catch (e) {
+      if (e.code != 'PGRST202') rethrow;
+      final result = await _db.rpc(
+        'register_student',
+        params: baseParams,
+      );
+      return result as String;
+    }
   }
 
   Future<List<StudentBasic>> getAllStudents() async {
@@ -651,6 +669,7 @@ class SupabaseService {
     required String sessionId,
     required String studentId,
     required String studentName,
+    String? deviceUuid,
     String? deviceName,
     String? deviceMac,
     String? deviceFingerprint,
@@ -665,6 +684,9 @@ class SupabaseService {
       if (deviceName != null && deviceName.trim().isNotEmpty) {
         payload['device_name'] = deviceName.trim();
       }
+      if (deviceUuid != null && deviceUuid.trim().isNotEmpty) {
+        payload['device_uuid'] = deviceUuid.trim();
+      }
       if (deviceMac != null && deviceMac.trim().isNotEmpty) {
         payload['device_mac'] = deviceMac.trim();
       }
@@ -677,7 +699,8 @@ class SupabaseService {
       return true;
     } on PostgrestException catch (e) {
       if (e.code == 'PGRST204' &&
-          (e.message.contains('device_name') ||
+          (e.message.contains('device_uuid') ||
+              e.message.contains('device_name') ||
               e.message.contains('device_mac') ||
               e.message.contains('device_fingerprint'))) {
         await _db.from('attendance').insert({
@@ -712,32 +735,32 @@ class SupabaseService {
     final labels = <String, String>{};
 
     for (final row in attendees) {
-      final fingerprint = (row['device_fingerprint'] as String?)?.trim();
-      if (fingerprint == null || fingerprint.isEmpty) continue;
+      final deviceUuid = (row['device_uuid'] as String?)?.trim();
+      if (deviceUuid == null || deviceUuid.isEmpty) continue;
 
       final studentName =
           ((row['student_name'] as String?)?.trim().isNotEmpty ?? false)
               ? (row['student_name'] as String).trim()
               : ((row['student_id'] as String?) ?? 'Unknown student');
       final deviceName = (row['device_name'] as String?)?.trim();
-      final deviceMac = (row['device_mac'] as String?)?.trim();
-      final label = (deviceName != null && deviceName.isNotEmpty)
-          ? deviceName
-          : ((deviceMac != null && deviceMac.isNotEmpty)
-              ? deviceMac
-              : 'Unknown device');
+      final displayName =
+          (deviceName != null && deviceName.isNotEmpty) ? deviceName : 'Unknown device';
+      final shortUuid =
+          deviceUuid.length > 8 ? deviceUuid.substring(0, 8) : deviceUuid;
+      final label = '$displayName • $shortUuid';
 
-      buckets.putIfAbsent(fingerprint, () => <String>{}).add(studentName);
-      labels.putIfAbsent(fingerprint, () => label);
+      buckets.putIfAbsent(deviceUuid, () => <String>{}).add(studentName);
+      labels.putIfAbsent(deviceUuid, () => label);
     }
 
     final anomalies = <AttendanceAnomaly>[];
-    buckets.forEach((fingerprint, students) {
+    buckets.forEach((deviceUuid, students) {
       if (students.length < 2) return;
       final sortedStudents = students.toList()..sort();
       anomalies.add(
         AttendanceAnomaly(
-          deviceLabel: labels[fingerprint] ?? 'Unknown device',
+          deviceLabel: labels[deviceUuid] ?? 'Unknown device',
+          deviceUuid: deviceUuid,
           students: sortedStudents,
         ),
       );
@@ -861,16 +884,21 @@ class SupabaseService {
       // Fallback for deployments where RPC is not yet created.
       final rows = await _db
           .from('attendance')
-          .select('student_id, student_name, marked_at, device_name, device_fingerprint')
+          .select('student_id, student_name, marked_at, device_name, device_uuid, device_fingerprint')
           .eq('session_id', sessionId)
           .order('marked_at');
 
       return rows.map((map) {
         final deviceName = (map['device_name'] as String?)?.trim();
+        final deviceUuid = (map['device_uuid'] as String?)?.trim();
         final fp = (map['device_fingerprint'] as String?)?.trim();
         final deviceUsed = (deviceName != null && deviceName.isNotEmpty)
-            ? deviceName
-            : ((fp != null && fp.isNotEmpty) ? fp : 'Unknown device');
+            ? ((deviceUuid != null && deviceUuid.isNotEmpty)
+                ? '$deviceName (UUID-Device: $deviceUuid)'
+                : deviceName)
+            : ((deviceUuid != null && deviceUuid.isNotEmpty)
+                ? 'UUID-Device: $deviceUuid'
+                : ((fp != null && fp.isNotEmpty) ? fp : 'Unknown device'));
         return SessionAttendanceDetailItem(
           studentId: (map['student_id'] as String?) ?? '',
           studentName: (map['student_name'] as String?) ?? 'Student',
@@ -879,6 +907,42 @@ class SupabaseService {
         );
       }).toList();
     }
+  }
+
+  Future<List<AttendanceAnomaly>> getSessionDeviceAnomalies(
+    String sessionId,
+  ) async {
+    final rows = await _db.rpc(
+      'get_session_device_anomalies',
+      params: {'p_session_id': sessionId},
+    );
+    if (rows is! List) return [];
+
+    final anomalies = rows.map((row) {
+      final map = row as Map<String, dynamic>;
+      final rawUuid = (map['device_uuid'] as String?)?.trim() ?? '';
+      final shortUuid = rawUuid.length > 8 ? rawUuid.substring(0, 8) : rawUuid;
+      final namesRaw = map['student_names'];
+      final idsRaw = map['student_ids'];
+
+      final names = namesRaw is List
+          ? namesRaw.whereType<String>().map((e) => e.trim()).where((e) => e.isNotEmpty).toList()
+          : <String>[];
+      final ids = idsRaw is List
+          ? idsRaw.whereType<String>().map((e) => e.trim()).where((e) => e.isNotEmpty).toList()
+          : <String>[];
+      final students = names.isNotEmpty ? names : ids;
+
+      return AttendanceAnomaly(
+        deviceLabel:
+            shortUuid.isEmpty ? 'Unknown UUID-Device' : 'UUID-Device: $shortUuid',
+        deviceUuid: rawUuid,
+        students: students,
+      );
+    }).toList();
+
+    anomalies.sort((a, b) => b.students.length.compareTo(a.students.length));
+    return anomalies;
   }
 
   Future<bool> hasStudentMarkedAttendance({

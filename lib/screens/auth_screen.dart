@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../services/ble_service.dart';
 import '../services/supabase_service.dart';
 import 'professor_dashboard_screen.dart';
 import 'student_dashboard_screen.dart';
@@ -16,6 +17,7 @@ class AuthScreen extends StatefulWidget {
 
 class _AuthScreenState extends State<AuthScreen> {
   final _db = SupabaseService();
+  final _ble = BleService();
   final _userCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   final _studentIdCtrl = TextEditingController();
@@ -75,11 +77,14 @@ class _AuthScreenState extends State<AuthScreen> {
     setState(() => _loading = true);
     try {
       if (_role == 'student' && _isRegister) {
+        final deviceInfo = await _ble.getAttendanceDeviceInfo();
         await _db.registerStudent(
           studentId: _studentIdCtrl.text,
           fullName: _fullNameCtrl.text,
           username: _userCtrl.text,
           password: _passCtrl.text,
+          deviceUuid: deviceInfo.deviceUuid,
+          deviceName: deviceInfo.deviceName,
         );
       }
 

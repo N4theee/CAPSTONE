@@ -849,7 +849,7 @@ class _AttendeesExpansion extends StatelessWidget {
                           ),
                         ),
                         child: Text(
-                          'Anomaly detected: ${a.students.join(' and ')} used the same device (${a.deviceLabel}).',
+                          'Same UUID-Device used to attend: ${a.students.join(' and ')} (${a.deviceLabel}).',
                           style: const TextStyle(
                             color: Color(0xFFFECACA),
                             fontSize: 12,
@@ -913,7 +913,10 @@ class _AttendeesExpansion extends StatelessWidget {
                       '${a['student_id']}',
                       if ((a['device_name'] as String?)?.trim().isNotEmpty ?? false)
                         'Device used: ${a['device_name']}',
+                      if ((a['device_uuid'] as String?)?.trim().isNotEmpty ?? false)
+                        'UUID-Device: ${(a['device_uuid'] as String).trim()}',
                       if (!((a['device_name'] as String?)?.trim().isNotEmpty ?? false) &&
+                          !((a['device_uuid'] as String?)?.trim().isNotEmpty ?? false) &&
                           ((a['device_fingerprint'] as String?)?.trim().isNotEmpty ?? false))
                         'Device used: ${(a['device_fingerprint'] as String).trim()}',
                     ].join('\n'),

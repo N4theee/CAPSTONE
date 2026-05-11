@@ -223,6 +223,7 @@ class _ProfessorDashboardScreenState extends State<ProfessorDashboardScreen> {
                     'ATX',
                     textAlign: TextAlign.center,
                     style: TextStyle(
+                      fontFamily: 'Sceageus',
                       fontSize: markSize,
                       fontWeight: FontWeight.w900,
                       height: 0.85,

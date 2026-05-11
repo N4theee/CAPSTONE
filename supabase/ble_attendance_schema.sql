@@ -102,6 +102,7 @@ create table if not exists public.attendance (
   student_name text not null,
   marked_at timestamptz not null default now(),
   device_name text,
+  device_uuid uuid,
   device_mac text,
   device_fingerprint text
 );
@@ -109,6 +110,8 @@ create table if not exists public.attendance (
 -- Upgrade path for older attendance schemas without device metadata.
 alter table public.attendance
   add column if not exists device_name text;
+alter table public.attendance
+  add column if not exists device_uuid uuid;
 alter table public.attendance
   add column if not exists device_mac text;
 alter table public.attendance
@@ -120,6 +123,26 @@ create unique index if not exists attendance_unique_session_student_idx
 create index if not exists attendance_device_fingerprint_idx
   on public.attendance (device_fingerprint)
   where device_fingerprint is not null;
+
+create index if not exists attendance_device_uuid_idx
+  on public.attendance (device_uuid)
+  where device_uuid is not null;
+
+create table if not exists public.student_devices (
+  id uuid primary key default gen_random_uuid(),
+  student_id text not null references public.students(id) on delete cascade,
+  device_uuid uuid not null,
+  device_name text,
+  first_seen_at timestamptz not null default now(),
+  last_seen_at timestamptz not null default now(),
+  unique (student_id, device_uuid)
+);
+
+create index if not exists student_devices_device_uuid_idx
+  on public.student_devices (device_uuid);
+
+create index if not exists student_devices_student_id_idx
+  on public.student_devices (student_id);
 
 -- ---------- FUNCTIONS ----------
 
@@ -150,11 +173,15 @@ as $$
   limit 1;
 $$;
 
+drop function if exists public.register_student(text, text, text, text);
+
 create or replace function public.register_student(
   p_student_id text,
   p_full_name text,
   p_username text,
-  p_password text
+  p_password text,
+  p_device_uuid uuid default null,
+  p_device_name text default null
 )
 returns text
 language plpgsql
@@ -183,9 +210,50 @@ begin
     trim(p_full_name)
   );
 
+  if p_device_uuid is not null then
+    insert into public.student_devices (student_id, device_uuid, device_name)
+    values (
+      trim(p_student_id),
+      p_device_uuid,
+      nullif(trim(coalesce(p_device_name, '')), '')
+    )
+    on conflict (student_id, device_uuid) do update
+      set device_name = coalesce(excluded.device_name, public.student_devices.device_name),
+          last_seen_at = now();
+  end if;
+
   return trim(p_student_id);
 end;
 $$;
+
+create or replace function public.sync_student_device_from_attendance()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.device_uuid is not null then
+    insert into public.student_devices (student_id, device_uuid, device_name)
+    values (
+      new.student_id,
+      new.device_uuid,
+      nullif(trim(coalesce(new.device_name, '')), '')
+    )
+    on conflict (student_id, device_uuid) do update
+      set device_name = coalesce(excluded.device_name, public.student_devices.device_name),
+          last_seen_at = now();
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_sync_student_device_from_attendance on public.attendance;
+create trigger trg_sync_student_device_from_attendance
+after insert or update of device_uuid, device_name
+on public.attendance
+for each row
+execute function public.sync_student_device_from_attendance();
 
 alter table public.professors
   alter column max_students set default 30;
@@ -494,12 +562,56 @@ as $$
     a.student_id,
     a.student_name,
     a.marked_at,
-    coalesce(nullif(trim(a.device_name), ''), nullif(trim(a.device_fingerprint), ''), 'Unknown device') as device_used
+    coalesce(
+      case
+        when nullif(trim(a.device_name), '') is not null and a.device_uuid is not null
+          then trim(a.device_name) || ' (UUID-Device: ' || a.device_uuid::text || ')'
+        when nullif(trim(a.device_name), '') is not null
+          then trim(a.device_name)
+        when a.device_uuid is not null
+          then 'UUID-Device: ' || a.device_uuid::text
+        else null
+      end,
+      nullif(trim(a.device_name), ''),
+      case when a.device_uuid is not null then 'UUID-Device: ' || a.device_uuid::text else null end,
+      nullif(trim(a.device_fingerprint), ''),
+      'Unknown device'
+    ) as device_used
   from public.attendance a
   join public.sessions s on s.id = a.session_id
   where s.id = p_session_id
     and s.professor_id = trim(p_professor_id)
   order by a.marked_at asc;
+$$;
+
+create or replace function public.get_session_device_anomalies(
+  p_session_id uuid
+)
+returns table (
+  device_uuid uuid,
+  students_count bigint,
+  student_ids text[],
+  student_names text[],
+  first_marked_at timestamptz,
+  last_marked_at timestamptz
+)
+language sql
+security definer
+set search_path = public
+as $$
+  select
+    a.device_uuid,
+    count(distinct a.student_id) as students_count,
+    array_agg(distinct a.student_id order by a.student_id) as student_ids,
+    array_agg(distinct a.student_name order by a.student_name) as student_names,
+    min(a.marked_at) as first_marked_at,
+    max(a.marked_at) as last_marked_at
+  from public.attendance a
+  where a.session_id = p_session_id
+    and a.device_uuid is not null
+  group by a.device_uuid
+  having count(distinct a.student_id) > 1
+  order by students_count desc, first_marked_at asc;
 $$;
 
 create or replace function public.get_student_attendance_history(
@@ -566,7 +678,7 @@ end;
 $$;
 
 grant execute on function public.app_login(text, text, text) to anon, authenticated;
-grant execute on function public.register_student(text, text, text, text) to anon, authenticated;
+grant execute on function public.register_student(text, text, text, text, uuid, text) to anon, authenticated;
 grant execute on function public.admin_create_professor_account(text, text, text, text, int) to anon, authenticated;
 grant execute on function public.admin_create_subject_offering(text, text, text, text, text, text) to anon, authenticated;
 grant execute on function public.admin_assign_student_to_offering(text, uuid) to anon, authenticated;
@@ -574,6 +686,7 @@ grant execute on function public.get_admin_enrollments() to anon, authenticated;
 grant execute on function public.get_student_dashboard(text) to anon, authenticated;
 grant execute on function public.get_professor_session_history(text) to anon, authenticated;
 grant execute on function public.get_professor_session_attendees(text, uuid) to anon, authenticated;
+grant execute on function public.get_session_device_anomalies(uuid) to anon, authenticated;
 grant execute on function public.get_student_attendance_history(text) to anon, authenticated;
 grant execute on function public.update_display_name(text, text, text) to anon, authenticated;
 grant execute on function public.clear_professor_history(text) to anon, authenticated;

@@ -7,17 +7,21 @@ import 'package:flutter/services.dart';
 import 'package:flutter_ble_peripheral/flutter_ble_peripheral.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 
 import '../config.dart';
 
 class AttendanceDeviceInfo {
   const AttendanceDeviceInfo({
     required this.deviceName,
+    required this.deviceUuid,
     required this.deviceFingerprint,
     this.deviceMac,
   });
 
   final String deviceName;
+  final String deviceUuid;
   final String deviceFingerprint;
   final String? deviceMac;
 }
@@ -37,6 +41,19 @@ class BleService {
   String? _targetBeaconUuid;
   String? _targetBeaconName;
   final FlutterBlePeripheral _peripheral = FlutterBlePeripheral();
+  static const _deviceUuidKey = 'attendance_device_uuid';
+  static const Uuid _uuid = Uuid();
+
+  Future<String> getOrCreateDeviceUuid() async {
+    final prefs = await SharedPreferences.getInstance();
+    final existing = prefs.getString(_deviceUuidKey)?.trim();
+    if (existing != null && existing.isNotEmpty) {
+      return existing;
+    }
+    final generated = _uuid.v4();
+    await prefs.setString(_deviceUuidKey, generated);
+    return generated;
+  }
 
   // ── PERMISSIONS ──────────────────────────────────────────────────────
   Future<bool> requestPermissions() async {
@@ -99,9 +116,11 @@ class BleService {
   }
 
   Future<AttendanceDeviceInfo> getAttendanceDeviceInfo() async {
+    final deviceUuid = await getOrCreateDeviceUuid();
     if (kIsWeb) {
-      return const AttendanceDeviceInfo(
+      return AttendanceDeviceInfo(
         deviceName: 'Web Browser',
+        deviceUuid: deviceUuid,
         deviceFingerprint: 'web-browser',
       );
     }
@@ -119,6 +138,7 @@ class BleService {
       final name = manufacturer.isNotEmpty ? '$manufacturer $model' : model;
       return AttendanceDeviceInfo(
         deviceName: name,
+        deviceUuid: deviceUuid,
         deviceFingerprint: fingerprint,
       );
     }
@@ -132,6 +152,7 @@ class BleService {
       final fingerprint = 'ios:${ios.identifierForVendor ?? model}:$model';
       return AttendanceDeviceInfo(
         deviceName: name,
+        deviceUuid: deviceUuid,
         deviceFingerprint: fingerprint,
       );
     }
@@ -143,6 +164,7 @@ class BleService {
     final fingerprint = '$os:$machine';
     return AttendanceDeviceInfo(
       deviceName: machine,
+      deviceUuid: deviceUuid,
       deviceFingerprint: fingerprint,
     );
   }

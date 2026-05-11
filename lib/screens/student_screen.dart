@@ -200,6 +200,7 @@ class _StudentScreenState extends State<StudentScreen>
         sessionId: _sessionId!,
         studentId: widget.studentId,
         studentName: widget.studentName,
+        deviceUuid: deviceInfo.deviceUuid,
         deviceName: deviceInfo.deviceName,
         deviceMac: deviceInfo.deviceMac,
         deviceFingerprint: deviceInfo.deviceFingerprint,
