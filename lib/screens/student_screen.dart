@@ -39,7 +39,9 @@ class _StudentScreenState extends State<StudentScreen>
   String? _sessionId;
   String? _subject;
   String? _beaconUuid;
+  String? _beaconAdvertisedName;
   DateTime? _sessionStartedAt;
+  int _sessionRssiThreshold = AppConfig.rssiThreshold;
 
   Map<String, int> _nearbyDevices = {};
   bool _scanningNearby = false;
@@ -70,7 +72,11 @@ class _StudentScreenState extends State<StudentScreen>
     if (state == AppLifecycleState.resumed &&
         _sessionActive &&
         _beaconUuid != null) {
-      _ble.startProximityScanning(_beaconUuid!);
+      _ble.startProximityScanning(
+        _beaconUuid!,
+        beaconName: _beaconAdvertisedName ?? AppConfig.defaultBeaconName,
+        rssiThreshold: _sessionRssiThreshold,
+      );
     }
     if (state == AppLifecycleState.paused) {
       _ble.stopProximityScanning();
@@ -122,6 +128,14 @@ class _StudentScreenState extends State<StudentScreen>
         final dynamic beaconNameRaw = sessionForProfessor['beacon_name'];
         final newBeaconUuid = beaconRaw.toString();
         final newBeaconName = beaconNameRaw?.toString();
+        final rssiRaw = sessionForProfessor['rssi_threshold'];
+        final int parsedRssi;
+        if (rssiRaw is int) {
+          parsedRssi = rssiRaw;
+        } else {
+          parsedRssi =
+              int.tryParse(rssiRaw?.toString() ?? '') ?? AppConfig.rssiThreshold;
+        }
         final startedStr = sessionForProfessor['started_at'] as String?;
         final started = startedStr != null
             ? DateTime.parse(startedStr).toLocal()
@@ -132,6 +146,8 @@ class _StudentScreenState extends State<StudentScreen>
             _sessionId = newId;
             _subject = sessionForProfessor['subject'] as String?;
             _beaconUuid = newBeaconUuid;
+            _beaconAdvertisedName = newBeaconName;
+            _sessionRssiThreshold = parsedRssi;
             _sessionActive = true;
             _attended = false;
             _sessionStartedAt = started;
@@ -141,6 +157,7 @@ class _StudentScreenState extends State<StudentScreen>
           await _ble.startProximityScanning(
             newBeaconUuid,
             beaconName: newBeaconName ?? AppConfig.defaultBeaconName,
+            rssiThreshold: parsedRssi,
           );
         } else if (mounted && _sessionStartedAt == null && started != null) {
           setState(() => _sessionStartedAt = started);
@@ -164,6 +181,7 @@ class _StudentScreenState extends State<StudentScreen>
             _inRange = false;
             _sessionId = null;
             _beaconUuid = null;
+            _beaconAdvertisedName = null;
             _sessionStartedAt = null;
           });
         }

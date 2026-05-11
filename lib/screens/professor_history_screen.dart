@@ -161,14 +161,22 @@ class _ProfessorHistoryScreenState extends State<ProfessorHistoryScreen> {
                     const <AttendanceAnomaly>[];
                 if (attendees.isEmpty) {
                   return const Center(
-                    child: Text('No students attended this session.'),
+                    child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text(
+                        'No enrolled students for this class section.',
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
                   );
                 }
                 return Column(
                   children: [
                     ListTile(
                       title: Text('${item.subjectCode} • Section ${item.section}'),
-                      subtitle: const Text('Students attended in this session'),
+                      subtitle: const Text(
+                        'Enrolled students — Absent if they did not mark attendance',
+                      ),
                     ),
                     const Divider(height: 1),
                     if (anomalies.isNotEmpty)
@@ -182,7 +190,7 @@ class _ProfessorHistoryScreenState extends State<ProfessorHistoryScreen> {
                           border: Border.all(color: Colors.red.shade200),
                         ),
                         child: Text(
-                          'Anomaly detected: Same UUID-Device used by multiple students in this session.',
+                          'Anomaly: the same device signal appears for multiple students in this session.',
                           style: TextStyle(
                             color: Colors.red.shade900,
                             fontSize: 12,
@@ -197,22 +205,56 @@ class _ProfessorHistoryScreenState extends State<ProfessorHistoryScreen> {
                         separatorBuilder: (_, _) => const Divider(height: 1),
                         itemBuilder: (_, i) {
                           final a = attendees[i];
-                          final hh = a.markedAt.hour.toString().padLeft(2, '0');
-                          final mm = a.markedAt.minute.toString().padLeft(2, '0');
+                          final timeStr = a.isPresent && a.markedAt != null
+                              ? '${a.markedAt!.hour.toString().padLeft(2, '0')}:${a.markedAt!.minute.toString().padLeft(2, '0')}'
+                              : '—';
                           return ListTile(
                             leading: CircleAvatar(
+                              backgroundColor: a.isPresent
+                                  ? Colors.green.shade100
+                                  : Colors.orange.shade100,
                               child: Text(
                                 a.studentName.isEmpty
                                     ? '?'
                                     : a.studentName[0].toUpperCase(),
+                                style: TextStyle(
+                                  color: a.isPresent
+                                      ? Colors.green.shade900
+                                      : Colors.orange.shade900,
+                                ),
                               ),
                             ),
                             title: Text(a.studentName),
                             subtitle: Text(
-                              '${a.studentId}\nDevice used: ${a.deviceUsed}',
+                              a.isPresent
+                                  ? 'Present • Device: ${a.deviceUsed ?? 'Unknown'}'
+                                  : 'Absent — did not mark attendance',
                             ),
-                            isThreeLine: true,
-                            trailing: Text('$hh:$mm'),
+                            isThreeLine: false,
+                            trailing: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Chip(
+                                  label: Text(
+                                    a.isPresent ? 'Present' : 'Absent',
+                                    style: const TextStyle(fontSize: 11),
+                                  ),
+                                  visualDensity: VisualDensity.compact,
+                                  padding: EdgeInsets.zero,
+                                  materialTapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  timeStr,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontFeatures: [FontFeature.tabularFigures()],
+                                  ),
+                                ),
+                              ],
+                            ),
                           );
                         },
                       ),

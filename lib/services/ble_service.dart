@@ -40,6 +40,7 @@ class BleService {
   bool _scanning = false;
   String? _targetBeaconUuid;
   String? _targetBeaconName;
+  int _rssiThreshold = AppConfig.rssiThreshold;
   final FlutterBlePeripheral _peripheral = FlutterBlePeripheral();
   static const _deviceUuidKey = 'attendance_device_uuid';
   static const Uuid _uuid = Uuid();
@@ -223,6 +224,8 @@ class BleService {
   Future<void> startProximityScanning(
     String beaconUuid, {
     String? beaconName,
+    /// When null, uses [AppConfig.rssiThreshold] (session row can override per class).
+    int? rssiThreshold,
   }) async {
     if (_scanning) stopProximityScanning();
 
@@ -235,7 +238,8 @@ class BleService {
     _scanning   = true;
     _targetBeaconUuid = beaconUuid.trim().toLowerCase();
     _targetBeaconName = beaconName?.trim().toLowerCase();
-    debugPrint('[BLE] Starting proximity scan for UUID: "$_targetBeaconUuid"');
+    _rssiThreshold = rssiThreshold ?? AppConfig.rssiThreshold;
+    debugPrint('[BLE] Starting proximity scan for UUID: "$_targetBeaconUuid" RSSI>=$_rssiThreshold');
 
     _runScan();
 
@@ -271,7 +275,7 @@ class BleService {
         final uuidMatch = serviceUuids.contains(_targetBeaconUuid);
         debugPrint('[BLE]   → "$name" / "$advName" | RSSI: $rssi');
 
-        if ((uuidMatch || nameMatch) && rssi >= AppConfig.rssiThreshold) {
+        if ((uuidMatch || nameMatch) && rssi >= _rssiThreshold) {
           found = true;
           debugPrint(
               '[BLE] ✅ PROFESSOR BEACON IN RANGE! UUID=$_targetBeaconUuid NAME=$_targetBeaconName RSSI=$rssi');

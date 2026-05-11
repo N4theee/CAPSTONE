@@ -13,7 +13,6 @@ class AdminWebPanelScreen extends StatefulWidget {
 
 class _AdminWebPanelScreenState extends State<AdminWebPanelScreen> {
   final _db = SupabaseService();
-  final _profIdCtrl = TextEditingController();
   final _nameCtrl = TextEditingController();
   final _userCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
@@ -46,10 +45,12 @@ class _AdminWebPanelScreenState extends State<AdminWebPanelScreen> {
   String? _selectedOfferingId;
   String? _selectedEnrollmentKey;
 
-  static const _bg = Color(0xFF0B1220);
-  static const _card = Color(0xFF151E32);
-  static const _accent = Color(0xFF7C3AED);
-  // Keep in sync with session screens palette.
+  // Calm slate + violet accent; body text kept light for readability.
+  static const _bg = Color(0xFF0F172A);
+  static const _card = Color(0xFF1E293B);
+  static const _accent = Color(0xFF8B5CF6);
+  static const _muted = Color(0xFFCBD5E1);
+  static const _border = Color(0xFF334155);
 
   @override
   void initState() {
@@ -59,7 +60,6 @@ class _AdminWebPanelScreenState extends State<AdminWebPanelScreen> {
 
   @override
   void dispose() {
-    _profIdCtrl.dispose();
     _nameCtrl.dispose();
     _userCtrl.dispose();
     _passCtrl.dispose();
@@ -74,8 +74,8 @@ class _AdminWebPanelScreenState extends State<AdminWebPanelScreen> {
   Future<void> _createProfessor() async {
     setState(() => _loading = true);
     try {
-      final id = await _db.createProfessorByAdmin(
-        professorId: _profIdCtrl.text,
+      await _db.createProfessorByAdmin(
+        professorId: '',
         fullName: _nameCtrl.text,
         username: _userCtrl.text,
         password: _passCtrl.text,
@@ -83,7 +83,7 @@ class _AdminWebPanelScreenState extends State<AdminWebPanelScreen> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Professor created successfully ($id).')),
+        const SnackBar(content: Text('Professor created successfully.')),
       );
       await _loadLists();
     } catch (e) {
@@ -300,6 +300,11 @@ class _AdminWebPanelScreenState extends State<AdminWebPanelScreen> {
     final dark = theme.copyWith(
       scaffoldBackgroundColor: _bg,
       cardColor: _card,
+      colorScheme: theme.colorScheme.copyWith(
+        surface: _card,
+        onSurface: const Color(0xFFE2E8F0),
+        onSurfaceVariant: const Color(0xFFCBD5E1),
+      ),
       appBarTheme: const AppBarTheme(
         backgroundColor: _bg,
         foregroundColor: Colors.white,
@@ -308,11 +313,11 @@ class _AdminWebPanelScreenState extends State<AdminWebPanelScreen> {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: Colors.white.withValues(alpha: 0.04),
-        labelStyle: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
-        hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.4)),
+        labelStyle: TextStyle(color: Colors.white.withValues(alpha: 0.88)),
+        hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.62)),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+          borderSide: const BorderSide(color: _border),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
@@ -339,8 +344,13 @@ class _AdminWebPanelScreenState extends State<AdminWebPanelScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         ),
       ),
-      dividerTheme: DividerThemeData(color: Colors.white.withValues(alpha: 0.08)),
+      dividerTheme: const DividerThemeData(color: _border),
     );
+
+    final screenW = MediaQuery.sizeOf(context).width;
+    final contentMaxW =
+        screenW > 960 ? 900.0 : (screenW - 24).clamp(300.0, 900.0);
+    final gutter = ((screenW - contentMaxW) / 2).clamp(12.0, 48.0);
 
     return Theme(
       data: dark,
@@ -370,13 +380,17 @@ class _AdminWebPanelScreenState extends State<AdminWebPanelScreen> {
           ),
           child: Center(
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 920),
+              constraints: BoxConstraints(maxWidth: contentMaxW),
               child: ListView(
-                padding: const EdgeInsets.all(20),
+                padding: EdgeInsets.fromLTRB(gutter, 20, gutter, 40),
                 children: [
               Card(
                 color: _card,
                 elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: const BorderSide(color: _border),
+                ),
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
@@ -387,13 +401,6 @@ class _AdminWebPanelScreenState extends State<AdminWebPanelScreen> {
                         style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 12),
-                      TextField(
-                        controller: _profIdCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Professor ID (ex: prof_joel)',
-                        ),
-                      ),
-                      const SizedBox(height: 10),
                       TextField(
                         controller: _nameCtrl,
                         decoration: const InputDecoration(
@@ -425,8 +432,8 @@ class _AdminWebPanelScreenState extends State<AdminWebPanelScreen> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Section assignment is now done per class offering and student enrollment.',
-                        style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                        'Section assignment is per class offering and student enrollment. Login email is the professor username.',
+                        style: TextStyle(fontSize: 12, color: _muted),
                       ),
                       const SizedBox(height: 10),
                       FilledButton.icon(
@@ -467,7 +474,7 @@ class _AdminWebPanelScreenState extends State<AdminWebPanelScreen> {
                             .map(
                               (p) => DropdownMenuItem(
                                 value: p.id,
-                                child: Text('${p.fullName} (${p.id})'),
+                                child: Text(p.fullName),
                               ),
                             )
                             .toList(),
@@ -506,7 +513,12 @@ class _AdminWebPanelScreenState extends State<AdminWebPanelScreen> {
                                   .map(
                                     (u) => DropdownMenuItem(
                                       value: u,
-                                      child: Text(u),
+                                      child: Text(
+                                        u,
+                                        style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
                                     ),
                                   )
                                   .toList(),
@@ -550,8 +562,8 @@ class _AdminWebPanelScreenState extends State<AdminWebPanelScreen> {
               ),
               const SizedBox(height: 6),
               Text(
-                'Admin can edit student-professor-section assignment here.',
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                'Admin can edit student–subject enrollment here.',
+                style: TextStyle(fontSize: 12, color: _muted),
               ),
               const SizedBox(height: 12),
               if (_loadingLists) const LinearProgressIndicator(),
@@ -562,7 +574,7 @@ class _AdminWebPanelScreenState extends State<AdminWebPanelScreen> {
                 items: _students
                     .map((s) => DropdownMenuItem(
                           value: s.id,
-                          child: Text('${s.fullName} (${s.id})'),
+                          child: Text(s.fullName),
                         ))
                     .toList(),
                 onChanged: (v) => setState(() => _selectedStudentId = v),
@@ -574,7 +586,7 @@ class _AdminWebPanelScreenState extends State<AdminWebPanelScreen> {
                 items: _professors
                     .map((p) => DropdownMenuItem(
                           value: p.id,
-                          child: Text('${p.fullName} (${p.id})'),
+                          child: Text(p.fullName),
                         ))
                     .toList(),
                 onChanged: (v) {
@@ -739,7 +751,7 @@ class _AdminWebPanelScreenState extends State<AdminWebPanelScreen> {
                                 ..._professors.map(
                                   (p) => DropdownMenuItem<String?>(
                                     value: p.id,
-                                    child: Text('${p.fullName} (${p.id})'),
+                                    child: Text(p.fullName),
                                   ),
                                 ),
                               ],
@@ -814,7 +826,7 @@ class _AdminWebPanelScreenState extends State<AdminWebPanelScreen> {
                                   : 'Date range: ${_reportRange!.start.toLocal().toString().split(' ').first} to ${_reportRange!.end.toLocal().toString().split(' ').first}',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Colors.grey.shade700,
+                                color: _muted,
                               ),
                             ),
                           ),
@@ -860,7 +872,7 @@ class _AdminWebPanelScreenState extends State<AdminWebPanelScreen> {
                                   subtitle: Text(
                                     '${row.professorName} • ${row.markedAt.toLocal()}',
                                     style: TextStyle(
-                                      color: Colors.white.withValues(alpha: 0.6),
+                                      color: Colors.white.withValues(alpha: 0.78),
                                     ),
                                   ),
                                 );
@@ -930,6 +942,8 @@ class _AdminWebPanelScreenState extends State<AdminWebPanelScreen> {
           o.subjectCode == _selectedSubjectCode && o.section == _selectedSection,
       orElse: () => const SubjectOffering(
         id: '',
+        subjectId: '',
+        sectionId: '',
         subjectCode: '',
         subjectTitle: '',
         section: '',

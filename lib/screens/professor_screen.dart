@@ -53,6 +53,18 @@ class _ProfessorScreenState extends State<ProfessorScreen>
   Future<void> _startSession() async {
     setState(() => _loading = true);
     try {
+      // Beacon UUID/name and RSSI come from the admin-configured offering (not typed by professor).
+      const sessionRssi = -100;
+      final uuid = widget.offering.beaconUuid.trim();
+      final advertisedName = _effectiveAdvertisedBeaconName();
+      if (uuid.isEmpty) {
+        setState(() => _loading = false);
+        _toast(
+          'This class has no beacon UUID on file. Ask your administrator to set the beacon on this subject offering.',
+        );
+        return;
+      }
+
       final granted = await _ble.requestPermissions();
       if (!granted) {
         throw Exception('Bluetooth permissions are required');
@@ -64,16 +76,17 @@ class _ProfessorScreenState extends State<ProfessorScreen>
       }
 
       await _ble.startProfessorBeacon(
-        beaconUuid: widget.offering.beaconUuid,
-        localName: widget.offering.beaconName,
+        beaconUuid: uuid,
+        localName: advertisedName,
       );
 
       final session = await _db.startSession(
         professorId: widget.offering.professorId,
         offeringId: widget.offering.id,
         subject: widget.offering.label,
-        beaconUuid: widget.offering.beaconUuid,
-        beaconName: widget.offering.beaconName,
+        beaconUuid: uuid,
+        beaconName: advertisedName,
+        rssiThreshold: sessionRssi,
       );
       setState(() {
         _sessionId = session['id'];
@@ -121,6 +134,15 @@ class _ProfessorScreenState extends State<ProfessorScreen>
   void _toast(String msg) => ScaffoldMessenger.of(context)
       .showSnackBar(SnackBar(content: Text(msg)));
 
+  /// BLE local name when starting a session (matches DB session `beacon_name`).
+  String _effectiveAdvertisedBeaconName() {
+    final configured = widget.offering.beaconName.trim();
+    if (configured.isNotEmpty) return configured;
+    final code = widget.offering.subjectCode.trim();
+    if (code.isNotEmpty) return code;
+    return 'Attendance';
+  }
+
   void _openSessionSettings() {
     showModalBottomSheet<void>(
       context: context,
@@ -145,13 +167,23 @@ class _ProfessorScreenState extends State<ProfessorScreen>
               ),
               const SizedBox(height: 12),
               Text(
-                'Beacon UUID\n${widget.offering.beaconUuid}',
+                'Beacon UUID (from subject offering)\n'
+                '${widget.offering.beaconUuid.isEmpty ? 'Not set' : widget.offering.beaconUuid}',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.85),
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Advertised name (BLE)\n${_effectiveAdvertisedBeaconName()}',
                 style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 12),
               ),
               const SizedBox(height: 8),
               Text(
-                'Advertised name: ${widget.offering.beaconName}',
-                style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 12),
+                'RSSI threshold for this session is −100. Students must be in range of this beacon.',
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 11),
               ),
             ],
           ),
@@ -849,7 +881,7 @@ class _AttendeesExpansion extends StatelessWidget {
                           ),
                         ),
                         child: Text(
-                          'Same UUID-Device used to attend: ${a.students.join(' and ')} (${a.deviceLabel}).',
+                          'Possible shared device used by: ${a.students.join(' and ')}.',
                           style: const TextStyle(
                             color: Color(0xFFFECACA),
                             fontSize: 12,
@@ -910,15 +942,11 @@ class _AttendeesExpansion extends StatelessWidget {
                   ),
                   subtitle: Text(
                     [
-                      '${a['student_id']}',
                       if ((a['device_name'] as String?)?.trim().isNotEmpty ?? false)
-                        'Device used: ${a['device_name']}',
-                      if ((a['device_uuid'] as String?)?.trim().isNotEmpty ?? false)
-                        'UUID-Device: ${(a['device_uuid'] as String).trim()}',
+                        'Device: ${a['device_name']}',
                       if (!((a['device_name'] as String?)?.trim().isNotEmpty ?? false) &&
-                          !((a['device_uuid'] as String?)?.trim().isNotEmpty ?? false) &&
                           ((a['device_fingerprint'] as String?)?.trim().isNotEmpty ?? false))
-                        'Device used: ${(a['device_fingerprint'] as String).trim()}',
+                        'Device fingerprint on file',
                     ].join('\n'),
                     style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.45),

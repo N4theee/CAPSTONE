@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 
 import 'admin_web_panel_screen.dart';
 import 'auth_screen.dart';
+import '../services/supabase_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -12,6 +13,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  final _db = SupabaseService();
   final _adminUserCtrl = TextEditingController();
   final _adminPassCtrl = TextEditingController();
 
@@ -174,10 +176,14 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 12),
               ElevatedButton(
-                onPressed: () {
-                  final ok = _adminUserCtrl.text.trim() == 'ADMIN-NATH' &&
-                      _adminPassCtrl.text.trim() == '1234567890';
-                  Navigator.pop(ctx, ok);
+                onPressed: () async {
+                  final user = await _db.login(
+                    username: _adminUserCtrl.text.trim(),
+                    password: _adminPassCtrl.text.trim(),
+                    role: 'admin',
+                  );
+                  if (!ctx.mounted) return;
+                  Navigator.pop(ctx, user != null && user.role == 'admin');
                 },
                 child: const Text('Login'),
               ),

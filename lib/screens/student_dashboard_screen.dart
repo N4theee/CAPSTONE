@@ -59,17 +59,16 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
         .watchStudentSessionNotifications(widget.user.linkedId)
         .listen((items) {
           if (!mounted || items.isEmpty) return;
-          setState(() {
-            _notifications.insertAll(0, items);
-          });
-          final latest = items.first;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'New session started: ${latest.subjectCode} ${latest.section}',
-              ),
-            ),
-          );
+          var addedAny = false;
+          for (final item in items) {
+            if (_notifications.any((n) => n.sessionId == item.sessionId)) {
+              continue;
+            }
+            _notifications.insert(0, item);
+            addedAny = true;
+          }
+          if (!addedAny) return;
+          setState(() {});
         });
   }
 
