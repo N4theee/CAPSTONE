@@ -7,6 +7,7 @@ import '../config.dart';
 import '../services/ble_service.dart';
 import '../services/supabase_service.dart';
 import '../ui/responsive.dart';
+import '../ui/student_attendance_ui.dart';
 
 class StudentScreen extends StatefulWidget {
   const StudentScreen({
@@ -50,11 +51,6 @@ class _StudentScreenState extends State<StudentScreen>
   Timer? _uiClockTimer;
 
   late AnimationController _pulseController;
-
-  static const _purple = Color(0xFF6246EA);
-  static const _purpleDark = Color(0xFF2E2A5E);
-  static const _success = Color(0xFF4ADE80);
-  static const _pageBg = Color(0xFFF3F4FA);
 
   @override
   void initState() {
@@ -244,18 +240,22 @@ class _StudentScreenState extends State<StudentScreen>
   void _openHowItWorks() {
     showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('How it works'),
-        content: const Text(
-          'Your phone listens for the professor’s Bluetooth beacon. '
-          'Keep Bluetooth and Location on and stay within range to mark attendance.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('OK'),
+      builder: (ctx) => Theme(
+        data: StudentAttendanceUi.themeOverlay(Theme.of(context)),
+        child: AlertDialog(
+          backgroundColor: StudentAttendanceUi.surfaceElevated,
+          title: const Text('How it works'),
+          content: const Text(
+            'Your phone listens for the professor’s Bluetooth beacon. '
+            'Keep Bluetooth and Location on and stay within range to mark attendance.',
           ),
-        ],
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -263,33 +263,41 @@ class _StudentScreenState extends State<StudentScreen>
   void _openSettingsSheet() {
     showModalBottomSheet<void>(
       context: context,
+      backgroundColor: StudentAttendanceUi.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text(
-                'Permissions',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Bluetooth and location access are required to verify you are near the class.',
-              ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  openAppSettings();
-                },
-                child: const Text('Open system settings'),
-              ),
-            ],
+      builder: (ctx) => Theme(
+        data: StudentAttendanceUi.themeOverlay(Theme.of(context)),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Permissions',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Bluetooth and location access are required to verify you are near the class.',
+                  style: TextStyle(
+                    color: StudentAttendanceUi.textSecondary,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    openAppSettings();
+                  },
+                  child: const Text('Open system settings'),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -333,173 +341,301 @@ class _StudentScreenState extends State<StudentScreen>
     final pad = AppBreakpoints.horizontalPadding(context);
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     final radarH = AppBreakpoints.sessionRadarHeight(context, max: 280);
+    final maxBody = AppBreakpoints.historyContentMaxWidth(
+      MediaQuery.sizeOf(context).width,
+    );
+    final teal = StudentAttendanceUi.accentTeal;
+    final tealDark = StudentAttendanceUi.accentTealDark;
+    final success = StudentAttendanceUi.success;
+    final themed = StudentAttendanceUi.themeOverlay(Theme.of(context));
 
-    return Scaffold(
-      backgroundColor: _pageBg,
-      appBar: AppBar(
-        backgroundColor: _purpleDark,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        title: const Text(
-          'Student',
-          style: TextStyle(fontWeight: FontWeight.w600),
-        ),
-        actions: [
-          IconButton(
-            tooltip: 'Settings',
-            onPressed: _openSettingsSheet,
-            icon: const Icon(Icons.settings_outlined),
+    return Theme(
+      data: themed,
+      child: Scaffold(
+        backgroundColor: StudentAttendanceUi.background,
+        appBar: AppBar(
+          backgroundColor: StudentAttendanceUi.background,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          title: const Text(
+            'Active Session',
+            style: TextStyle(fontWeight: FontWeight.w600),
           ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(pad, 16, pad, 28 + bottomInset),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (!_bleGranted)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Material(
-                  color: Colors.orange.shade50,
-                  borderRadius: BorderRadius.circular(14),
-                  child: InkWell(
-                    onTap: () => openAppSettings(),
-                    borderRadius: BorderRadius.circular(14),
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Row(
-                        children: [
-                          Icon(Icons.warning_amber_rounded,
-                              color: Colors.orange.shade800),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              'Grant Bluetooth and Location in settings to use proximity.',
-                              style: TextStyle(
-                                color: Colors.orange.shade900,
-                                fontSize: 13,
-                              ),
+          actions: [
+            IconButton(
+              tooltip: 'Settings',
+              onPressed: _openSettingsSheet,
+              icon: const Icon(Icons.settings_outlined),
+            ),
+          ],
+        ),
+        body: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(pad, 16, pad, 28 + bottomInset),
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxBody),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (!_bleGranted)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Material(
+                        color: const Color(0xFF3D2A1F),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          side: BorderSide(
+                            color: Colors.orange.withValues(alpha: 0.45),
+                          ),
+                        ),
+                        child: InkWell(
+                          onTap: () => openAppSettings(),
+                          borderRadius: BorderRadius.circular(14),
+                          child: Padding(
+                            padding: const EdgeInsets.all(14),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.warning_amber_rounded,
+                                  color: Colors.orange.shade300,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    'Grant Bluetooth and Location in settings to use proximity.',
+                                    style: TextStyle(
+                                      color: Colors.orange.shade100,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+                                Icon(
+                                  Icons.chevron_right,
+                                  color: Colors.orange.shade200,
+                                ),
+                              ],
                             ),
                           ),
-                          const Icon(Icons.chevron_right),
-                        ],
+                        ),
                       ),
                     ),
+                  _SessionHeroCard(
+                    sessionActive: _sessionActive,
+                    attended: _attended,
+                    inRange: _inRange,
+                    courseTitle: courseTitle,
+                    section: widget.offering.section,
+                    professorName: widget.offering.professorName,
+                    subjectFallback: _subject ?? 'No active session',
+                    elapsed: _elapsedLabel(),
+                    purple: teal,
+                    purpleDark: tealDark,
+                    success: success,
                   ),
-                ),
-              ),
-            _SessionHeroCard(
-              sessionActive: _sessionActive,
-              attended: _attended,
-              inRange: _inRange,
-              courseTitle: courseTitle,
-              section: widget.offering.section,
-              professorName: widget.offering.professorName,
-              subjectFallback: _subject ?? 'No active session',
-              elapsed: _elapsedLabel(),
-              purple: _purple,
-              purpleDark: _purpleDark,
-              success: _success,
-            ),
-            const SizedBox(height: 14),
-            _ProximityBanner(
-              purple: _purple,
-              onHowItWorks: _openHowItWorks,
-            ),
-            const SizedBox(height: 20),
-            Text(
-              _sessionActive
-                  ? (_inRange
-                      ? 'You are within range of the class beacon.'
-                      : 'Move closer until you are in range.')
-                  : 'Waiting for your professor to start a session.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.grey.shade700,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 16),
-            _StudentRadarPanel(
-              height: radarH,
-              pulse: _pulseController,
-              inRange: _inRange,
-              sessionActive: _sessionActive,
-              purple: _purple,
-              success: _success,
-            ),
-            const SizedBox(height: 22),
-            _MarkAttendanceButton(
-              enabled: _inRange && _sessionActive && !_attended,
-              loading: _loading,
-              onPressed: _markAttendance,
-              purple: _purple,
-            ),
-            const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.shield_outlined, size: 16, color: _purple),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    'You can only mark once per session',
+                  const SizedBox(height: 14),
+                  _ProximityBanner(
+                    purple: teal,
+                    onHowItWorks: _openHowItWorks,
+                  ),
+                  const SizedBox(height: 16),
+                  _StudentRadarPanel(
+                    height: radarH,
+                    pulse: _pulseController,
+                    inRange: _inRange,
+                    sessionActive: _sessionActive,
+                    purple: teal,
+                    success: success,
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    'Stay near the professor to stay in range. Bluetooth must be ON.',
                     textAlign: TextAlign.center,
-                    maxLines: 2,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: StudentAttendanceUi.textSecondary,
+                      fontWeight: FontWeight.w500,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _sessionActive
+                        ? (_inRange
+                            ? 'You are within range of the class beacon.'
+                            : 'Move closer until you are in range.')
+                        : 'Waiting for your professor to start a session.',
+                    textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 12,
-                      color: _purple.withValues(alpha: 0.85),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 22),
-            _SessionInfoCard(
-              startedLabel: _startedTimeLabel(),
-              purple: _purple,
-            ),
-            const SizedBox(height: 16),
-            OutlinedButton.icon(
-              onPressed: _scanningNearby ? null : _scanNearby,
-              icon: _scanningNearby
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.bluetooth_searching_rounded),
-              label: Text(
-                _scanningNearby ? 'Scanning nearby…' : 'Scan nearby devices',
-              ),
-            ),
-            if (_nearbyDevices.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text(
-                'Nearby (debug)',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: Colors.grey.shade800,
-                ),
-              ),
-              const SizedBox(height: 8),
-              ...(_nearbyDevices.entries.toList()
-                    ..sort((a, b) => b.value.compareTo(a.value)))
-                  .map(
-                    (e) => Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Row(
-                        children: [
-                          Expanded(child: Text(e.key)),
-                          Text('${e.value} dBm'),
-                        ],
+                      color: StudentAttendanceUi.textSecondary.withValues(
+                        alpha: 0.85,
                       ),
                     ),
                   ),
+                  const SizedBox(height: 18),
+                  _MarkAttendanceButton(
+                    enabled: _inRange && _sessionActive && !_attended,
+                    loading: _loading,
+                    onPressed: _markAttendance,
+                    purple: teal,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Tap to record your attendance',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: StudentAttendanceUi.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.shield_outlined, size: 16, color: teal),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          'You can only mark once per session',
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: teal.withValues(alpha: 0.85),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  _SessionHowItWorksInline(onTap: _openHowItWorks),
+                  const SizedBox(height: 16),
+                  _SessionInfoCard(
+                    startedLabel: _startedTimeLabel(),
+                    purple: teal,
+                  ),
+                  const SizedBox(height: 16),
+                  OutlinedButton.icon(
+                    onPressed: _scanningNearby ? null : _scanNearby,
+                    icon: _scanningNearby
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.bluetooth_searching_rounded),
+                    label: Text(
+                      _scanningNearby
+                          ? 'Scanning nearby…'
+                          : 'Scan nearby devices',
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: StudentAttendanceUi.mint,
+                      side: BorderSide(
+                        color: StudentAttendanceUi.mint.withValues(alpha: 0.5),
+                      ),
+                    ),
+                  ),
+                  if (_nearbyDevices.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      'Nearby (debug)',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: StudentAttendanceUi.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    ...(_nearbyDevices.entries.toList()
+                          ..sort((a, b) => b.value.compareTo(a.value)))
+                        .map(
+                          (e) => Padding(
+                            padding: const EdgeInsets.only(bottom: 6),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    e.key,
+                                    style: const TextStyle(
+                                      color: StudentAttendanceUi.textSecondary,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                                Text(
+                                  '${e.value} dBm',
+                                  style: const TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SessionHowItWorksInline extends StatelessWidget {
+  const _SessionHowItWorksInline({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: StudentAttendanceUi.surfaceElevated,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.info_outline_rounded,
+                color: StudentAttendanceUi.accentTeal,
+                size: 22,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'How it works',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Your phone listens for the professor’s Bluetooth beacon. '
+                      'Keep Bluetooth and Location on and stay within range.',
+                      style: TextStyle(
+                        color: StudentAttendanceUi.textSecondary,
+                        fontSize: 13,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -747,13 +883,16 @@ class _ProximityBanner extends StatelessWidget {
                 style: TextStyle(
                   fontWeight: FontWeight.w700,
                   fontSize: 13,
-                  color: Colors.grey.shade900,
+                  color: Colors.white.withValues(alpha: 0.95),
                 ),
               ),
               const SizedBox(height: 2),
               Text(
                 'Bluetooth must be ON',
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: StudentAttendanceUi.textSecondary,
+                ),
               ),
             ],
           ),
@@ -761,11 +900,14 @@ class _ProximityBanner extends StatelessWidget {
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: StudentAttendanceUi.surfaceElevated,
             borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: StudentAttendanceUi.borderSubtle,
+            ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.06),
+                color: Colors.black.withValues(alpha: 0.25),
                 blurRadius: 12,
                 offset: const Offset(0, 4),
               ),
@@ -822,15 +964,15 @@ class _StudentRadarPanel extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: StudentAttendanceUi.surface,
         borderRadius: BorderRadius.circular(14),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
+            color: Colors.black.withValues(alpha: 0.2),
             blurRadius: 10,
           ),
         ],
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(color: StudentAttendanceUi.borderSubtle),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -839,15 +981,21 @@ class _StudentRadarPanel extends StatelessWidget {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.signal_cellular_alt_rounded,
-                  color: inRange && sessionActive ? success : Colors.grey,
-                  size: 18),
+              Icon(
+                Icons.signal_cellular_alt_rounded,
+                color: inRange && sessionActive
+                    ? success
+                    : StudentAttendanceUi.textSecondary,
+                size: 18,
+              ),
               const SizedBox(width: 6),
               Text(
                 sessionActive && inRange ? 'Strong' : '—',
                 style: TextStyle(
                   fontWeight: FontWeight.w800,
-                  color: inRange && sessionActive ? success : Colors.grey,
+                  color: inRange && sessionActive
+                      ? success
+                      : StudentAttendanceUi.textSecondary,
                 ),
               ),
             ],
@@ -857,7 +1005,7 @@ class _StudentRadarPanel extends StatelessWidget {
             sessionActive && inRange ? 'In range' : 'No lock',
             style: TextStyle(
               fontSize: 11,
-              color: Colors.grey.shade600,
+              color: StudentAttendanceUi.textSecondary,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -865,7 +1013,7 @@ class _StudentRadarPanel extends StatelessWidget {
             sessionActive && inRange ? 'Excellent' : 'Move closer',
             style: TextStyle(
               fontSize: 11,
-              color: Colors.grey.shade500,
+              color: StudentAttendanceUi.textSecondary.withValues(alpha: 0.75),
             ),
           ),
         ],
@@ -893,11 +1041,12 @@ class _StudentRadarPanel extends StatelessWidget {
               Container(
                 margin: const EdgeInsets.symmetric(horizontal: 4),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: StudentAttendanceUi.surfaceElevated,
                   borderRadius: BorderRadius.circular(22),
+                  border: Border.all(color: StudentAttendanceUi.borderSubtle),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.05),
+                      color: Colors.black.withValues(alpha: 0.35),
                       blurRadius: 14,
                       offset: const Offset(0, 6),
                     ),
@@ -959,7 +1108,7 @@ class _StudentRadarPanel extends StatelessWidget {
                   height: hub,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: Colors.white,
+                    color: const Color(0xFFF1F5F9),
                     boxShadow: [
                       BoxShadow(
                         color: purple.withValues(alpha: inRange ? 0.45 : 0.2),
@@ -1012,7 +1161,7 @@ class _StudentRadarRingsPainter extends CustomPainter {
     final paint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1
-      ..color = purple.withValues(alpha: active ? 0.12 : 0.06);
+      ..color = purple.withValues(alpha: active ? 0.22 : 0.10);
     for (var i = 1; i <= 4; i++) {
       canvas.drawCircle(c, maxR * i / 4, paint);
     }
@@ -1069,11 +1218,14 @@ class _MarkAttendanceButton extends StatelessWidget {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(18),
           gradient: LinearGradient(
-            colors: [purple, Color.lerp(purple, const Color(0xFF3B82F6), 0.35)!],
+            colors: [
+              purple,
+              StudentAttendanceUi.mint,
+            ],
           ),
           boxShadow: [
             BoxShadow(
-              color: purple.withValues(alpha: 0.28),
+              color: StudentAttendanceUi.accentTeal.withValues(alpha: 0.35),
               blurRadius: 16,
               offset: const Offset(0, 8),
             ),
@@ -1134,11 +1286,12 @@ class _SessionInfoCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: StudentAttendanceUi.surfaceElevated,
         borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: StudentAttendanceUi.borderSubtle),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: Colors.black.withValues(alpha: 0.2),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -1151,12 +1304,12 @@ class _SessionInfoCard extends StatelessWidget {
             children: [
               Icon(Icons.event_note_rounded, color: purple),
               const SizedBox(width: 8),
-              Text(
+              const Text(
                 'Session Info',
                 style: TextStyle(
                   fontWeight: FontWeight.w800,
                   fontSize: 15,
-                  color: Colors.grey.shade900,
+                  color: Colors.white,
                 ),
               ),
             ],
@@ -1164,19 +1317,26 @@ class _SessionInfoCard extends StatelessWidget {
           const SizedBox(height: 12),
           Row(
             children: [
-              Icon(Icons.schedule_rounded, size: 20, color: Colors.grey.shade600),
+              Icon(
+                Icons.schedule_rounded,
+                size: 20,
+                color: StudentAttendanceUi.textSecondary,
+              ),
               const SizedBox(width: 8),
               Text(
                 'Started at',
-                style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
+                style: TextStyle(
+                  color: StudentAttendanceUi.textSecondary,
+                  fontSize: 14,
+                ),
               ),
               const Spacer(),
               Text(
                 startedLabel,
-                style: TextStyle(
+                style: const TextStyle(
                   fontWeight: FontWeight.w700,
                   fontSize: 14,
-                  color: Colors.grey.shade900,
+                  color: Colors.white,
                 ),
               ),
             ],

@@ -50,4 +50,37 @@ class AppBreakpoints {
     if (w < 600) return 18;
     return 24;
   }
+
+  /// Centered content column on large screens (history, detail panes).
+  static double historyContentMaxWidth(double screenWidth) {
+    if (screenWidth >= 1400) return 1040;
+    if (screenWidth >= 1000) return 880;
+    if (screenWidth >= 720) return 640;
+    return screenWidth;
+  }
+
+  /// Session history cards: 1 on phones, 2 on tablets, 3 on wide desktop.
+  static int historySessionGridColumns(double screenWidth) {
+    if (screenWidth < 560) return 1;
+    if (screenWidth < 960) return 2;
+    return 3;
+  }
+
+  /// Fixed row height for history grid tiles (avoids aspect-ratio overflows).
+  static double historySessionTileExtent(BuildContext context, int cols) {
+    final raw = MediaQuery.textScalerOf(context).scale(1.0);
+    final s = raw.clamp(0.85, 1.75);
+    switch (cols) {
+      case 1:
+        return (132 * s).clamp(120.0, 220.0);
+      case 2:
+        return (144 * s).clamp(128.0, 240.0);
+      default:
+        return (158 * s).clamp(138.0, 260.0);
+    }
+  }
+
+  /// Narrow filter / date strip stacks vertically.
+  static bool historyUseCompactFilters(double contentWidth) =>
+      contentWidth < 420;
 }

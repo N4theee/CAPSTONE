@@ -1,8 +1,12 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/ble_service.dart';
 import '../services/supabase_service.dart';
+import '../ui/landing_auth_ui.dart';
+import '../ui/responsive.dart';
 import 'professor_dashboard_screen.dart';
 import 'student_dashboard_screen.dart';
 
@@ -25,6 +29,7 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _loading = false;
   bool _isRegister = false;
   bool _rememberMe = false;
+  bool _obscurePassword = true;
 
   late String _role;
   static const _rememberRoleKey = 'remember_role';
@@ -107,7 +112,9 @@ class _AuthScreenState extends State<AuthScreen> {
       } else {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => ProfessorDashboardScreen(user: user)),
+          MaterialPageRoute(
+            builder: (_) => ProfessorDashboardScreen(user: user),
+          ),
         );
       }
     } catch (e) {
@@ -120,86 +127,411 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
+  String get _screenTitle {
+    if (_role == 'professor') return 'Teacher Login';
+    return _isRegister ? 'Student Register' : 'Student Login';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final roleTitle = _role == 'student' ? 'Student' : 'Professor';
-    return Scaffold(
-      appBar: AppBar(title: Text('$roleTitle ${_isRegister ? "Register" : "Login"}')),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 460),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SegmentedButton<String>(
-                  segments: const [
-                    ButtonSegment(value: 'student', label: Text('Student')),
-                    ButtonSegment(value: 'professor', label: Text('Professor')),
-                  ],
-                  selected: {_role},
-                  onSelectionChanged: (v) {
-                    setState(() {
-                      _role = v.first;
-                      if (_role == 'professor') _isRegister = false;
-                    });
+    final pad = AppBreakpoints.horizontalPadding(context);
+    final w = AppBreakpoints.width(context);
+    final maxForm = math.min(440.0, w - pad * 2);
+    final inset = MediaQuery.viewInsetsOf(context).bottom;
+    final themed = LandingAuthUi.authThemeOverlay(Theme.of(context));
+
+    return Theme(
+      data: themed,
+      child: Scaffold(
+        extendBodyBehindAppBar: true,
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded),
+            onPressed: () => Navigator.pop(context),
+          ),
+          title: Text(_screenTitle),
+        ),
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            const CustomPaint(
+              painter: _AuthBackdropPainter(),
+              child: SizedBox.expand(),
+            ),
+            SafeArea(
+              child: AnimatedPadding(
+                duration: const Duration(milliseconds: 120),
+                curve: Curves.easeOut,
+                padding: EdgeInsets.only(bottom: inset),
+                child: LayoutBuilder(
+                  builder: (context, c) {
+                    return SingleChildScrollView(
+                      padding: EdgeInsets.fromLTRB(pad, 8, pad, 24),
+                      child: Align(
+                        alignment: Alignment.topCenter,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(maxWidth: maxForm),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const SizedBox(height: 8),
+                              _RoleSegmentBar(
+                                role: _role,
+                                onChanged: (r) {
+                                  setState(() {
+                                    _role = r;
+                                    if (_role == 'professor') {
+                                      _isRegister = false;
+                                    }
+                                  });
+                                },
+                              ),
+                              const SizedBox(height: 20),
+                              if (_role == 'student') ...[
+                                _RegisterModeRow(
+                                  value: _isRegister,
+                                  onChanged: (v) =>
+                                      setState(() => _isRegister = v),
+                                ),
+                                const SizedBox(height: 16),
+                              ],
+                              if (_role == 'student' && _isRegister) ...[
+                                TextField(
+                                  controller: _studentIdCtrl,
+                                  textInputAction: TextInputAction.next,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Student ID',
+                                    hintText: 'Enter student ID',
+                                    prefixIcon: Icon(
+                                      Icons.badge_outlined,
+                                      color: LandingAuthUi.textSecondary,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                TextField(
+                                  controller: _fullNameCtrl,
+                                  textInputAction: TextInputAction.next,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Full Name',
+                                    hintText: 'Enter full name',
+                                    prefixIcon: Icon(
+                                      Icons.person_outline_rounded,
+                                      color: LandingAuthUi.textSecondary,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                              ],
+                              TextField(
+                                controller: _userCtrl,
+                                textInputAction: TextInputAction.next,
+                                autocorrect: false,
+                                decoration: const InputDecoration(
+                                  labelText: 'Username',
+                                  hintText: 'Enter username',
+                                  prefixIcon: Icon(
+                                    Icons.person_outline_rounded,
+                                    color: LandingAuthUi.textSecondary,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              TextField(
+                                controller: _passCtrl,
+                                obscureText: _obscurePassword,
+                                textInputAction: TextInputAction.done,
+                                onSubmitted: (_) {
+                                  if (!_loading) _submit();
+                                },
+                                decoration: InputDecoration(
+                                  labelText: 'Password',
+                                  hintText: 'Enter password',
+                                  prefixIcon: const Icon(
+                                    Icons.lock_outline_rounded,
+                                    color: LandingAuthUi.textSecondary,
+                                  ),
+                                  suffixIcon: IconButton(
+                                    tooltip: _obscurePassword
+                                        ? 'Show password'
+                                        : 'Hide password',
+                                    onPressed: () => setState(
+                                      () => _obscurePassword = !_obscurePassword,
+                                    ),
+                                    icon: Icon(
+                                      _obscurePassword
+                                          ? Icons.visibility_outlined
+                                          : Icons.visibility_off_outlined,
+                                      color: LandingAuthUi.textSecondary,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              CheckboxListTile(
+                                contentPadding: EdgeInsets.zero,
+                                value: _rememberMe,
+                                onChanged: (v) =>
+                                    setState(() => _rememberMe = v ?? false),
+                                title: const Text('Remember me'),
+                                controlAffinity:
+                                    ListTileControlAffinity.leading,
+                              ),
+                              SizedBox(height: math.max(16.0, c.maxHeight * 0.02)),
+                              _GradientCtaButton(
+                                loading: _loading,
+                                label: _isRegister
+                                    ? 'Register & Login'
+                                    : 'Login',
+                                icon: _isRegister
+                                    ? Icons.app_registration_rounded
+                                    : Icons.login_rounded,
+                                onPressed: _loading ? null : _submit,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
                   },
                 ),
-                const SizedBox(height: 12),
-                if (_role == 'student')
-                  SwitchListTile(
-                    value: _isRegister,
-                    onChanged: (value) => setState(() => _isRegister = value),
-                    title: const Text('Register new student account'),
-                    contentPadding: EdgeInsets.zero,
-                  ),
-                if (_role == 'student' && _isRegister) ...[
-                  TextField(
-                    controller: _studentIdCtrl,
-                    decoration: const InputDecoration(labelText: 'Student ID'),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _fullNameCtrl,
-                    decoration: const InputDecoration(labelText: 'Full Name'),
-                  ),
-                  const SizedBox(height: 8),
-                ],
-                TextField(
-                  controller: _userCtrl,
-                  decoration: const InputDecoration(labelText: 'Username'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RoleSegmentBar extends StatelessWidget {
+  const _RoleSegmentBar({
+    required this.role,
+    required this.onChanged,
+  });
+
+  final String role;
+  final void Function(String role) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final isStudent = role == 'student';
+    return Row(
+      children: [
+        Expanded(
+          child: _SegmentChip(
+            label: 'Student',
+            selected: isStudent,
+            onTap: () => onChanged('student'),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _SegmentChip(
+            label: 'Teacher',
+            selected: !isStudent,
+            onTap: () => onChanged('professor'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SegmentChip extends StatelessWidget {
+  const _SegmentChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            gradient: selected ? LandingAuthUi.segmentSelected : null,
+            color: selected ? null : LandingAuthUi.surfaceMuted,
+            border: Border.all(
+              color: selected
+                  ? Colors.transparent
+                  : LandingAuthUi.borderSubtle,
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Center(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                  color: selected ? Colors.white : LandingAuthUi.textSecondary,
                 ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _passCtrl,
-                  obscureText: true,
-                  decoration: const InputDecoration(labelText: 'Password'),
-                ),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: _rememberMe,
-                  onChanged: (v) => setState(() => _rememberMe = v ?? false),
-                  title: const Text('Remember me'),
-                  controlAffinity: ListTileControlAffinity.leading,
-                ),
-                const SizedBox(height: 14),
-                ElevatedButton.icon(
-                  onPressed: _loading ? null : _submit,
-                  icon: _loading
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.login),
-                  label: Text(_isRegister ? 'Register & Login' : 'Login'),
-                ),
-              ],
+              ),
             ),
           ),
         ),
       ),
     );
   }
+}
+
+class _RegisterModeRow extends StatelessWidget {
+  const _RegisterModeRow({
+    required this.value,
+    required this.onChanged,
+  });
+
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            'New student account',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.92),
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+            ),
+          ),
+        ),
+        Switch(
+          value: value,
+          onChanged: onChanged,
+          thumbColor: const WidgetStatePropertyAll(Colors.white),
+          trackColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.selected)) {
+              return LandingAuthUi.teal.withValues(alpha: 0.55);
+            }
+            return LandingAuthUi.borderSubtle;
+          }),
+        ),
+      ],
+    );
+  }
+}
+
+class _GradientCtaButton extends StatelessWidget {
+  const _GradientCtaButton({
+    required this.loading,
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final bool loading;
+  final String label;
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final disabled = onPressed == null;
+    return Opacity(
+      opacity: disabled ? 0.55 : 1,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          gradient: LandingAuthUi.primaryCta,
+          boxShadow: [
+            BoxShadow(
+              color: LandingAuthUi.purple.withValues(alpha: 0.35),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onPressed,
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (loading)
+                    const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  else
+                    Icon(icon, color: Colors.white, size: 22),
+                  const SizedBox(width: 10),
+                  Text(
+                    loading ? 'Please wait…' : label,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AuthBackdropPainter extends CustomPainter {
+  const _AuthBackdropPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = Offset.zero & size;
+    final bg = Paint()
+      ..shader = const LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          LandingAuthUi.background,
+          LandingAuthUi.backgroundMid,
+          LandingAuthUi.background,
+        ],
+        stops: [0, 0.5, 1],
+      ).createShader(r);
+    canvas.drawRect(r, bg);
+
+    final p = Paint()
+      ..color = LandingAuthUi.purple.withValues(alpha: 0.06)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    for (var i = 0; i < 5; i++) {
+      final path = Path();
+      final y = size.height * (0.12 + i * 0.07);
+      path.moveTo(0, y);
+      for (double x = 0; x <= size.width; x += 8) {
+        path.lineTo(
+          x,
+          y + math.sin(x / 48 + i) * 6,
+        );
+      }
+      canvas.drawPath(path, p);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

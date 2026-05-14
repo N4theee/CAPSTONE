@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../services/supabase_service.dart';
 import '../ui/responsive.dart';
+import '../ui/student_attendance_ui.dart';
 import '../widgets/course_dashboard_card.dart';
 import 'home_screen.dart';
 import 'student_history_screen.dart';
@@ -26,11 +27,6 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
   StreamSubscription<List<SessionNotificationItem>>? _notificationSub;
   final List<SessionNotificationItem> _notifications = [];
   late String _displayName;
-
-  static const _gradientTop = Color(0xFF0D9488);
-  static const _gradientBottom = Color(0xFF115E59);
-  static const _cardTop = Color(0xFF14B8A6);
-  static const _cardTopBorder = Color(0xFF5EEAD4);
 
   @override
   void initState() {
@@ -59,16 +55,66 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
         .watchStudentSessionNotifications(widget.user.linkedId)
         .listen((items) {
           if (!mounted || items.isEmpty) return;
-          var addedAny = false;
+
+          final existingIds = _notifications.map((n) => n.sessionId).toSet();
+          final newlyAdded = <SessionNotificationItem>[];
+
           for (final item in items) {
-            if (_notifications.any((n) => n.sessionId == item.sessionId)) {
-              continue;
-            }
+            if (existingIds.contains(item.sessionId)) continue;
             _notifications.insert(0, item);
-            addedAny = true;
+            newlyAdded.add(item);
           }
-          if (!addedAny) return;
+
+          if (newlyAdded.isEmpty || !mounted) return;
+
           setState(() {});
+
+          // Show a lightweight in-app popup for the most recent new session.
+          final latest = newlyAdded.first;
+          final subjectLabel =
+              '${latest.subjectCode} - ${latest.subjectTitle} (Section ${latest.section})';
+
+          // Delay slightly to avoid ScaffoldMessenger lookup issues during build.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context)
+              ..hideCurrentSnackBar()
+              ..showSnackBar(
+                SnackBar(
+                  behavior: SnackBarBehavior.floating,
+                  backgroundColor: const Color(0xFF0F766E),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'New attendance session started',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subjectLabel,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Prof. ${latest.professorName}',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  ),
+                  duration: const Duration(seconds: 6),
+                  action: SnackBarAction(
+                    label: 'VIEW',
+                    textColor: Colors.white,
+                    onPressed: _openNotifications,
+                  ),
+                ),
+              );
+          });
         });
   }
 
@@ -286,7 +332,10 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [_gradientTop, _gradientBottom],
+            colors: [
+              StudentAttendanceUi.dashboardGradientTop,
+              StudentAttendanceUi.dashboardGradientBottom,
+            ],
           ),
         ),
         child: SafeArea(
@@ -321,11 +370,11 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                     child: _loading
                         ? const Center(
                             child: CircularProgressIndicator(
-                              color: Colors.white,
+                              color: StudentAttendanceUi.mint,
                             ),
                           )
                         : RefreshIndicator(
-                            color: _gradientTop,
+                            color: StudentAttendanceUi.dashboardGradientTop,
                             onRefresh: _load,
                             child: _offerings.isEmpty
                                 ? ListView(
@@ -371,9 +420,11 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                                         sectionLine: 'Section ${o.section}',
                                         footerLine:
                                             '$n ${n == 1 ? 'student' : 'students'}',
-                                        cardTop: _cardTop,
-                                        cardTopBorder: _cardTopBorder,
-                                        footerBar: const Color(0xFF134E4A),
+                                        cardTop: StudentAttendanceUi.dashboardCardTop,
+                                        cardTopBorder:
+                                            StudentAttendanceUi.dashboardCardBorder,
+                                        footerBar:
+                                            StudentAttendanceUi.dashboardFooterBar,
                                         footerText: Colors.white,
                                         chevron: Colors.white,
                                         onTap: () {
