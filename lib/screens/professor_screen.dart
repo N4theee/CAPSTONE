@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../services/ble_service.dart';
 import '../services/supabase_service.dart';
 import '../ui/responsive.dart';
+import '../util/db_timestamptz.dart';
 
 class ProfessorScreen extends StatefulWidget {
   const ProfessorScreen({
@@ -923,8 +924,7 @@ class _AttendeesExpansion extends StatelessWidget {
               ),
               itemBuilder: (_, i) {
                 final a = attendees[i];
-                final t =
-                    DateTime.tryParse(a['marked_at'] ?? '')?.toLocal();
+                final t = tryParseDbTimestamptzToLocal(a['marked_at']);
                 return ListTile(
                   leading: CircleAvatar(
                     backgroundColor: accent.withValues(alpha: 0.2),

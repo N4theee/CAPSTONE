@@ -12,6 +12,8 @@ class LandingAuthUi {
   static const Color teal = Color(0xFF14B8A6);
   static const Color purple = Color(0xFF8B5CF6);
   static const Color textSecondary = Color(0xFF94A3B8);
+  /// Prefix/suffix icons inside auth fields (high contrast on dark fill).
+  static const Color inputIconMuted = Color(0xFFCBD5E1);
 
   static const LinearGradient primaryCta = LinearGradient(
     colors: [teal, purple],
@@ -38,6 +40,10 @@ class LandingAuthUi {
   );
 
   static ThemeData authThemeOverlay(ThemeData base) {
+    const inputText = Color(0xFFF8FAFC);
+    const hint = Color(0xFFCBD5E1);
+    const label = Color(0xFFE2E8F0);
+
     return base.copyWith(
       scaffoldBackgroundColor: background,
       colorScheme: ColorScheme.dark(
@@ -45,7 +51,16 @@ class LandingAuthUi {
         primary: teal,
         onPrimary: Colors.white,
         secondary: purple,
-        onSurface: Colors.white,
+        onSurface: inputText,
+        onSurfaceVariant: hint,
+      ),
+      textTheme: base.textTheme.apply(
+        bodyColor: inputText,
+        displayColor: Colors.white,
+      ),
+      primaryTextTheme: base.primaryTextTheme.apply(
+        bodyColor: inputText,
+        displayColor: Colors.white,
       ),
       appBarTheme: const AppBarTheme(
         backgroundColor: Colors.transparent,
@@ -62,9 +77,20 @@ class LandingAuthUi {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: surfaceMuted,
-        labelStyle: const TextStyle(color: textSecondary, fontSize: 13),
+        labelStyle: const TextStyle(
+          color: label,
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
+        ),
+        floatingLabelStyle: const TextStyle(
+          color: label,
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
+        ),
         floatingLabelBehavior: FloatingLabelBehavior.always,
-        hintStyle: TextStyle(color: textSecondary.withValues(alpha: 0.65)),
+        hintStyle: const TextStyle(color: hint, fontSize: 15),
+        helperStyle: TextStyle(color: textSecondary.withValues(alpha: 0.95)),
+        errorStyle: const TextStyle(color: Color(0xFFFCA5A5)),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
           borderSide: const BorderSide(color: borderSubtle),
@@ -78,6 +104,8 @@ class LandingAuthUi {
           borderSide: BorderSide(color: teal.withValues(alpha: 0.85), width: 1.5),
         ),
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        prefixIconColor: hint,
+        suffixIconColor: hint,
       ),
       checkboxTheme: CheckboxThemeData(
         fillColor: WidgetStateProperty.resolveWith((states) {

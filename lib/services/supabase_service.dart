@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'device_identity_service.dart';
+import '../util/db_timestamptz.dart';
+
 class AppUser {
   const AppUser({
     required this.role,
@@ -15,6 +18,26 @@ class AppUser {
   final String linkedId;
   final String fullName;
   final String username;
+}
+
+class StudentActiveSessionStatus {
+  const StudentActiveSessionStatus({
+    required this.hasActiveSession,
+    this.sessionId,
+    this.offeringId,
+    required this.alreadyMarked,
+    this.subjectCode,
+    this.subjectTitle,
+    this.section,
+  });
+
+  final bool hasActiveSession;
+  final String? sessionId;
+  final String? offeringId;
+  final bool alreadyMarked;
+  final String? subjectCode;
+  final String? subjectTitle;
+  final String? section;
 }
 
 class SubjectOffering {
@@ -242,6 +265,91 @@ class SupabaseService {
     );
   }
 
+  /// Student login with device binding (RPC `app_student_login_with_device`).
+  Future<AppUser?> loginStudentWithDevice({
+    required String username,
+    required String password,
+    required DeviceIdentity identity,
+  }) async {
+    final raw = await _db.rpc(
+      'app_student_login_with_device',
+      params: {
+        'p_username': username.trim(),
+        'p_password': password.trim(),
+        'p_device_uuid': identity.deviceUuid.trim(),
+        'p_device_name': identity.deviceName.trim(),
+        'p_device_fingerprint': identity.deviceFingerprint.trim(),
+      },
+    );
+    if (raw is! List || raw.isEmpty) return null;
+    final row = raw.first as Map<String, dynamic>;
+    return AppUser(
+      role: row['role'] as String,
+      linkedId: row['linked_id'] as String,
+      fullName: row['full_name'] as String,
+      username: row['username'] as String,
+    );
+  }
+
+  Future<void> signOutStudentDevice({
+    required String studentId,
+    required DeviceIdentity identity,
+  }) async {
+    await _db.rpc(
+      'student_sign_out_device',
+      params: {
+        'p_student_id': studentId.trim(),
+        'p_device_uuid': identity.deviceUuid.trim(),
+      },
+    );
+  }
+
+  Future<StudentActiveSessionStatus> getStudentActiveSessionStatus(
+    String studentId,
+  ) async {
+    final raw = await _db.rpc(
+      'get_student_active_session_status',
+      params: {'p_student_id': studentId.trim()},
+    );
+    if (raw is! List || raw.isEmpty) {
+      return const StudentActiveSessionStatus(
+        hasActiveSession: false,
+        alreadyMarked: false,
+      );
+    }
+    final row = raw.first as Map<String, dynamic>;
+    return StudentActiveSessionStatus(
+      hasActiveSession: row['has_active_session'] as bool? ?? false,
+      sessionId: row['session_id'] as String?,
+      offeringId: row['offering_id'] as String?,
+      alreadyMarked: row['already_marked'] as bool? ?? false,
+      subjectCode: row['subject_code'] as String?,
+      subjectTitle: row['subject_title'] as String?,
+      section: row['section'] as String?,
+    );
+  }
+
+  /// Secure student attendance (device validated server-side).
+  Future<bool> markAttendanceSecure({
+    required String sessionId,
+    required String studentId,
+    required String studentName,
+    required DeviceIdentity identity,
+  }) async {
+    final result = await _db.rpc(
+      'mark_attendance_secure',
+      params: {
+        'p_session_id': sessionId,
+        'p_student_id': studentId,
+        'p_student_name': studentName.trim(),
+        'p_device_uuid': identity.deviceUuid.trim(),
+        'p_device_name': identity.deviceName.trim(),
+        'p_device_fingerprint': identity.deviceFingerprint.trim(),
+      },
+    );
+    return result == true;
+  }
+
   Future<String> registerStudent({
     required String studentId,
     required String fullName,
@@ -430,12 +538,12 @@ class SupabaseService {
 
       return AdminAttendanceReportItem(
         sessionId: (map['session_id'] as String?) ?? '',
-        sessionStartedAt: DateTime.parse(
-          (map['session_started_at'] as String?) ?? map['marked_at'] as String,
-        ).toLocal(),
+        sessionStartedAt: parseDbTimestamptzToLocal(
+          (map['session_started_at'] ?? map['marked_at'])!,
+        ),
         sessionEndedAt: (map['session_ended_at'] as String?) == null
             ? null
-            : DateTime.parse(map['session_ended_at'] as String).toLocal(),
+            : parseDbTimestamptzToLocal(map['session_ended_at'] as String),
         subjectCode: (map['subject_code'] as String?) ?? 'SUBJECT',
         subjectTitle: (map['subject_title'] as String?) ?? 'Untitled',
         section: (map['section'] as String?) ?? 'N/A',
@@ -443,7 +551,7 @@ class SupabaseService {
         professorName: (map['professor_name'] as String?) ?? 'Professor',
         studentId: (map['student_id'] as String?) ?? '',
         studentName: (map['student_name'] as String?) ?? 'Student',
-        markedAt: DateTime.parse(map['marked_at'] as String).toLocal(),
+        markedAt: parseDbTimestamptzToLocal(map['marked_at'] as String),
         deviceName: map['device_name'] as String?,
         deviceMac: map['device_mac'] as String?,
         deviceFingerprint: map['device_fingerprint'] as String?,
@@ -627,14 +735,14 @@ class SupabaseService {
     try {
       await _db
           .from('attendance_sessions')
-          .update({'is_active': false, 'ended_at': DateTime.now().toIso8601String()})
+          .update({'is_active': false, 'ended_at': utcIsoNowForDb()})
           .eq('subject_offering_id', offeringId)
           .eq('is_active', true);
     } on PostgrestException catch (e) {
       if (e.code == 'PGRST204' && e.message.contains('offering_id')) {
         await _db
             .from('attendance_sessions')
-            .update({'is_active': false, 'ended_at': DateTime.now().toIso8601String()})
+            .update({'is_active': false, 'ended_at': utcIsoNowForDb()})
             .eq('is_active', true);
       } else {
         rethrow;
@@ -689,7 +797,7 @@ class SupabaseService {
   Future<void> endSession(String sessionId) async {
     await _db.from('attendance_sessions').update({
       'is_active': false,
-      'ended_at': DateTime.now().toIso8601String(),
+      'ended_at': utcIsoNowForDb(),
     }).eq('id', sessionId);
     debugPrint('[DB] Session ended: $sessionId');
   }
@@ -739,7 +847,7 @@ class SupabaseService {
         'student_id': studentId,
         'student_device_id': null,
         'status': 'Present',
-        'marked_at': DateTime.now().toIso8601String(),
+        'marked_at': utcIsoNowForDb(),
       };
       if (deviceName != null && deviceName.trim().isNotEmpty) {
         payload['device_name'] = deviceName.trim();
@@ -768,7 +876,7 @@ class SupabaseService {
           'student_id': studentId,
           'student_device_id': null,
           'status': 'Present',
-          'marked_at': DateTime.now().toIso8601String(),
+          'marked_at': utcIsoNowForDb(),
         });
         debugPrint('[DB] Attendance marked for $studentName (legacy schema)');
         return true;
@@ -894,9 +1002,10 @@ class SupabaseService {
 
             final startedStr = m['started_at'];
             if (startedStr == null) continue;
-            final startedAt = DateTime.parse(startedStr.toString()).toUtc();
-            if (startedAt
-                .isBefore(subscriptionOpenedAt.subtract(skewPad))) {
+            final startedAt = parseDbTimestamptzToLocal(startedStr);
+            if (startedAt.isBefore(
+              subscriptionOpenedAt.subtract(skewPad).toLocal(),
+            )) {
               emitted.add(sessionId);
               continue;
             }
@@ -911,7 +1020,7 @@ class SupabaseService {
                 subjectTitle: offering.subjectTitle,
                 section: offering.section,
                 professorName: offering.professorName,
-                startedAt: startedAt.toLocal(),
+                startedAt: startedAt,
               ),
             );
           }
@@ -945,15 +1054,18 @@ class SupabaseService {
 
     return rows.map((row) {
       final map = row as Map<String, dynamic>;
+      final endedRaw = map['ended_at'];
+      final endedAt = (endedRaw == null ||
+              (endedRaw is String && endedRaw.trim().isEmpty))
+          ? null
+          : parseDbTimestamptzToLocal(endedRaw);
       return ProfessorSessionHistoryItem(
         sessionId: (map['session_id'] as String?) ?? '',
         subjectCode: (map['subject_code'] as String?) ?? 'SUBJECT',
         subjectTitle: (map['subject_title'] as String?) ?? 'Untitled',
         section: (map['section'] as String?) ?? 'N/A',
-        startedAt: DateTime.parse(map['started_at'] as String).toLocal(),
-        endedAt: map['ended_at'] == null
-            ? null
-            : DateTime.parse(map['ended_at'] as String).toLocal(),
+        startedAt: parseDbTimestamptzToLocal(map['started_at']),
+        endedAt: endedAt,
         isActive: (map['is_active'] as bool?) ?? false,
       );
     }).toList();
@@ -980,7 +1092,7 @@ class SupabaseService {
         final markedRaw = map['marked_at'];
         final markedAt = markedRaw == null
             ? null
-            : DateTime.parse(markedRaw as String).toLocal();
+            : parseDbTimestamptzToLocal(markedRaw);
         final deviceRaw = map['device_used'];
         final deviceStr =
             deviceRaw == null ? '' : _jsonStr(deviceRaw);
@@ -1070,8 +1182,7 @@ class SupabaseService {
               studentId: stuId,
               studentName: name.isEmpty ? 'Student' : name,
               isPresent: true,
-              markedAt:
-                  DateTime.parse(rec['marked_at'] as String).toLocal(),
+              markedAt: parseDbTimestamptzToLocal(rec['marked_at']),
               deviceUsed: deviceUsed,
             ),
           );
@@ -1219,9 +1330,9 @@ class SupabaseService {
         subjectTitle: (map['subject_title'] as String?) ?? 'Untitled',
         section: (map['section'] as String?) ?? 'N/A',
         professorName: (map['professor_name'] as String?) ?? 'Professor',
-        sessionStartedAt: DateTime.parse(map['session_started_at'] as String)
-            .toLocal(),
-        markedAt: DateTime.parse(map['marked_at'] as String).toLocal(),
+        sessionStartedAt:
+            parseDbTimestamptzToLocal(map['session_started_at'] as String),
+        markedAt: parseDbTimestamptzToLocal(map['marked_at'] as String),
       );
     }).toList();
   }

@@ -297,13 +297,25 @@ class _AdminWebPanelScreenState extends State<AdminWebPanelScreen> {
       );
     }
     final theme = Theme.of(context);
+    const inputText = Color(0xFFF8FAFC);
+    const hint = Color(0xFFCBD5E1);
+    const label = Color(0xFFE2E8F0);
+
     final dark = theme.copyWith(
       scaffoldBackgroundColor: _bg,
       cardColor: _card,
       colorScheme: theme.colorScheme.copyWith(
         surface: _card,
-        onSurface: const Color(0xFFE2E8F0),
-        onSurfaceVariant: const Color(0xFFCBD5E1),
+        onSurface: inputText,
+        onSurfaceVariant: hint,
+      ),
+      textTheme: theme.textTheme.apply(
+        bodyColor: inputText,
+        displayColor: Colors.white,
+      ),
+      primaryTextTheme: theme.primaryTextTheme.apply(
+        bodyColor: inputText,
+        displayColor: Colors.white,
       ),
       appBarTheme: const AppBarTheme(
         backgroundColor: _bg,
@@ -312,9 +324,20 @@ class _AdminWebPanelScreenState extends State<AdminWebPanelScreen> {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: Colors.white.withValues(alpha: 0.04),
-        labelStyle: TextStyle(color: Colors.white.withValues(alpha: 0.88)),
-        hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.62)),
+        fillColor: Colors.white.withValues(alpha: 0.07),
+        labelStyle: const TextStyle(
+          color: label,
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
+        ),
+        floatingLabelStyle: const TextStyle(
+          color: label,
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
+        ),
+        hintStyle: const TextStyle(color: hint, fontSize: 15),
+        helperStyle: TextStyle(color: _muted.withValues(alpha: 0.95)),
+        errorStyle: const TextStyle(color: Color(0xFFFCA5A5)),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
           borderSide: const BorderSide(color: _border),
@@ -323,6 +346,8 @@ class _AdminWebPanelScreenState extends State<AdminWebPanelScreen> {
           borderRadius: BorderRadius.circular(14),
           borderSide: const BorderSide(color: _accent, width: 1.3),
         ),
+        prefixIconColor: hint,
+        suffixIconColor: hint,
       ),
       snackBarTheme: SnackBarThemeData(
         backgroundColor: _card,

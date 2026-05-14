@@ -2,8 +2,11 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/ble_service.dart';
+import '../services/device_identity_service.dart';
+import '../services/local_session_service.dart';
 import '../services/supabase_service.dart';
 import '../ui/landing_auth_ui.dart';
 import '../ui/responsive.dart';
@@ -22,6 +25,8 @@ class AuthScreen extends StatefulWidget {
 class _AuthScreenState extends State<AuthScreen> {
   final _db = SupabaseService();
   final _ble = BleService();
+  final _identity = DeviceIdentityService();
+  final _localSession = LocalSessionService();
   final _userCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   final _studentIdCtrl = TextEditingController();
@@ -78,6 +83,23 @@ class _AuthScreenState extends State<AuthScreen> {
     await prefs.remove(_rememberPassKey);
   }
 
+  String? _studentDeviceLoginMessage(Object e) {
+    final raw = e is PostgrestException ? e.message : e.toString();
+    if (raw.contains('already signed in on another device')) {
+      return 'Cannot sign in. This student account is already signed in on another device.';
+    }
+    if (raw.contains('already registered to another student')) {
+      return 'Cannot sign in. This device is already registered to another student.';
+    }
+    if (raw.contains('not your registered device')) {
+      return 'Cannot sign in. This is not your registered device.';
+    }
+    if (e is PostgrestException && e.code == 'PGRST202') {
+      return 'Server is missing student device login. Run supabase/anti_proxy_device_security.sql.';
+    }
+    return null;
+  }
+
   Future<void> _submit() async {
     setState(() => _loading = true);
     try {
@@ -93,14 +115,31 @@ class _AuthScreenState extends State<AuthScreen> {
         );
       }
 
-      final user = await _db.login(
-        username: _userCtrl.text,
-        password: _passCtrl.text,
-        role: _role,
-      );
-      if (user == null) {
-        throw Exception('Invalid credentials');
+      late final AppUser user;
+      if (_role == 'student') {
+        final identity = await _identity.getDeviceIdentity();
+        final u = await _db.loginStudentWithDevice(
+          username: _userCtrl.text,
+          password: _passCtrl.text,
+          identity: identity,
+        );
+        if (u == null) {
+          throw Exception('Invalid credentials');
+        }
+        user = u;
+        await _localSession.saveUserSession(user, identity);
+      } else {
+        final u = await _db.login(
+          username: _userCtrl.text,
+          password: _passCtrl.text,
+          role: _role,
+        );
+        if (u == null) {
+          throw Exception('Invalid credentials');
+        }
+        user = u;
       }
+
       await _saveRemembered();
 
       if (!mounted) return;
@@ -119,8 +158,11 @@ class _AuthScreenState extends State<AuthScreen> {
       }
     } catch (e) {
       if (!mounted) return;
+      final mapped = _role == 'student' ? _studentDeviceLoginMessage(e) : null;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Auth failed: $e')),
+        SnackBar(
+          content: Text(mapped ?? 'Auth failed: $e'),
+        ),
       );
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -204,7 +246,7 @@ class _AuthScreenState extends State<AuthScreen> {
                                     hintText: 'Enter student ID',
                                     prefixIcon: Icon(
                                       Icons.badge_outlined,
-                                      color: LandingAuthUi.textSecondary,
+                                      color: LandingAuthUi.inputIconMuted,
                                     ),
                                   ),
                                 ),
@@ -217,7 +259,7 @@ class _AuthScreenState extends State<AuthScreen> {
                                     hintText: 'Enter full name',
                                     prefixIcon: Icon(
                                       Icons.person_outline_rounded,
-                                      color: LandingAuthUi.textSecondary,
+                                      color: LandingAuthUi.inputIconMuted,
                                     ),
                                   ),
                                 ),
@@ -232,7 +274,7 @@ class _AuthScreenState extends State<AuthScreen> {
                                   hintText: 'Enter username',
                                   prefixIcon: Icon(
                                     Icons.person_outline_rounded,
-                                    color: LandingAuthUi.textSecondary,
+                                    color: LandingAuthUi.inputIconMuted,
                                   ),
                                 ),
                               ),
@@ -249,7 +291,7 @@ class _AuthScreenState extends State<AuthScreen> {
                                   hintText: 'Enter password',
                                   prefixIcon: const Icon(
                                     Icons.lock_outline_rounded,
-                                    color: LandingAuthUi.textSecondary,
+                                    color: LandingAuthUi.inputIconMuted,
                                   ),
                                   suffixIcon: IconButton(
                                     tooltip: _obscurePassword
@@ -262,7 +304,7 @@ class _AuthScreenState extends State<AuthScreen> {
                                       _obscurePassword
                                           ? Icons.visibility_outlined
                                           : Icons.visibility_off_outlined,
-                                      color: LandingAuthUi.textSecondary,
+                                      color: LandingAuthUi.inputIconMuted,
                                     ),
                                   ),
                                 ),

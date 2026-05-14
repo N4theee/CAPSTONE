@@ -2,12 +2,15 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
 import '../services/ble_service.dart';
+import '../services/device_identity_service.dart';
 import '../services/supabase_service.dart';
 import '../ui/responsive.dart';
 import '../ui/student_attendance_ui.dart';
+import '../util/db_timestamptz.dart';
 
 class StudentScreen extends StatefulWidget {
   const StudentScreen({
@@ -29,6 +32,7 @@ class _StudentScreenState extends State<StudentScreen>
     with WidgetsBindingObserver, TickerProviderStateMixin {
   final _ble = BleService();
   final _db = SupabaseService();
+  final _identity = DeviceIdentityService();
   StreamSubscription<bool>? _proximitySub;
 
   bool _inRange = false;
@@ -134,7 +138,7 @@ class _StudentScreenState extends State<StudentScreen>
         }
         final startedStr = sessionForProfessor['started_at'] as String?;
         final started = startedStr != null
-            ? DateTime.parse(startedStr).toLocal()
+            ? parseDbTimestamptzToLocal(startedStr)
             : null;
 
         if (_sessionId != newId) {
@@ -209,23 +213,35 @@ class _StudentScreenState extends State<StudentScreen>
     setState(() => _loading = true);
 
     try {
-      final deviceInfo = await _ble.getAttendanceDeviceInfo();
-      final ok = await _db.markAttendance(
+      final identity = await _identity.getDeviceIdentity();
+      final ok = await _db.markAttendanceSecure(
         sessionId: _sessionId!,
         studentId: widget.studentId,
         studentName: widget.studentName,
-        deviceUuid: deviceInfo.deviceUuid,
-        deviceName: deviceInfo.deviceName,
-        deviceMac: deviceInfo.deviceMac,
-        deviceFingerprint: deviceInfo.deviceFingerprint,
+        identity: identity,
       );
 
       setState(() {
-        _attended = true;
+        _attended = ok ? true : _attended;
         _loading = false;
       });
 
-      _toast(ok ? 'Attendance marked!' : 'Attendance already marked');
+      _toast(
+        ok ? 'Attendance marked!' : 'Attendance already marked',
+      );
+    } on PostgrestException catch (e) {
+      setState(() => _loading = false);
+      final msg = e.message;
+      if (msg.contains('Attendance blocked') ||
+          msg.contains('not your registered attendance device')) {
+        _toast(
+          'Attendance blocked. This is not your registered attendance device.',
+        );
+      } else if (msg.contains('Attendance session has ended')) {
+        _toast('Attendance session has ended.');
+      } else {
+        _toast('Error: $msg');
+      }
     } catch (e) {
       setState(() => _loading = false);
       _toast('Error: $e');

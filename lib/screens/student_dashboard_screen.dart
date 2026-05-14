@@ -1,7 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../services/device_identity_service.dart';
+import '../services/local_session_service.dart';
 import '../services/supabase_service.dart';
 import '../ui/responsive.dart';
 import '../ui/student_attendance_ui.dart';
@@ -19,22 +22,46 @@ class StudentDashboardScreen extends StatefulWidget {
   State<StudentDashboardScreen> createState() => _StudentDashboardScreenState();
 }
 
-class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
+class _StudentDashboardScreenState extends State<StudentDashboardScreen>
+    with WidgetsBindingObserver {
   final _db = SupabaseService();
+  final _identity = DeviceIdentityService();
+  final _local = LocalSessionService();
   bool _loading = true;
   List<SubjectOffering> _offerings = [];
   Map<String, int> _enrollmentByOffering = {};
   StreamSubscription<List<SessionNotificationItem>>? _notificationSub;
   final List<SessionNotificationItem> _notifications = [];
   late String _displayName;
+  StudentActiveSessionStatus? _sessionGate;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _displayName = widget.user.fullName;
     _load();
     _listenForRealtimeNotifications();
+    _refreshSessionGate();
   }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_refreshSessionGate());
+    }
+  }
+
+  Future<void> _refreshSessionGate() async {
+    try {
+      final s = await _db.getStudentActiveSessionStatus(widget.user.linkedId);
+      if (mounted) setState(() => _sessionGate = s);
+    } catch (_) {
+      if (mounted) setState(() => _sessionGate = null);
+    }
+  }
+
+  bool get _logoutBlocked => _sessionGate?.hasActiveSession == true;
 
   Future<void> _load() async {
     final rows = await _db.getStudentOfferings(widget.user.linkedId);
@@ -191,7 +218,44 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
     ).showSnackBar(const SnackBar(content: Text('Name updated.')));
   }
 
-  void _signOut() {
+  Future<void> _signOut() async {
+    if (_logoutBlocked) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Session is active, cannot logout.')),
+      );
+      return;
+    }
+
+    try {
+      final identity = await _identity.getDeviceIdentity();
+      await _db.signOutStudentDevice(
+        studentId: widget.user.linkedId,
+        identity: identity,
+      );
+    } on PostgrestException catch (e) {
+      if (!mounted) return;
+      if (e.message.contains('Session is active')) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Session is active, cannot logout.')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Sign out failed: ${e.message}')),
+        );
+      }
+      return;
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Sign out failed: $e')),
+      );
+      return;
+    }
+
+    await _local.clearUserSession();
+    _identity.clearCache();
+    if (!mounted) return;
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (_) => const HomeScreen()),
@@ -253,7 +317,15 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
               } else if (v == 'history') {
                 _openHistory();
               } else if (v == 'logout') {
-                _signOut();
+                if (_logoutBlocked) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Session is active, cannot logout.'),
+                    ),
+                  );
+                } else {
+                  _signOut();
+                }
               }
             },
             itemBuilder: (ctx) => [
@@ -275,7 +347,12 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                 value: 'history',
                 child: Text('Attendance history'),
               ),
-              const PopupMenuItem(value: 'logout', child: Text('Sign out')),
+              PopupMenuItem(
+                value: 'logout',
+                child: Text(
+                  _logoutBlocked ? 'Sign out (session active)' : 'Sign out',
+                ),
+              ),
             ],
           ),
         ],
@@ -311,8 +388,15 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
         ),
         IconButton(
           tooltip: 'Sign out',
-          onPressed: _signOut,
-          icon: Icon(Icons.logout_rounded, color: iconColor),
+          onPressed: _logoutBlocked ? () {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Session is active, cannot logout.')),
+            );
+          } : _signOut,
+          icon: Icon(
+            Icons.logout_rounded,
+            color: _logoutBlocked ? Colors.white38 : iconColor,
+          ),
         ),
       ],
     );
@@ -427,8 +511,8 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                                             StudentAttendanceUi.dashboardFooterBar,
                                         footerText: Colors.white,
                                         chevron: Colors.white,
-                                        onTap: () {
-                                          Navigator.push(
+                                        onTap: () async {
+                                          await Navigator.push<void>(
                                             context,
                                             MaterialPageRoute(
                                               builder: (_) => StudentScreen(
@@ -438,6 +522,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                                               ),
                                             ),
                                           );
+                                          if (mounted) await _refreshSessionGate();
                                         },
                                       );
                                     },
@@ -455,6 +540,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _notificationSub?.cancel();
     super.dispose();
   }

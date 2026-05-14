@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config.dart';
-import 'screens/home_screen.dart';
+import 'screens/session_bootstrap_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,7 +24,7 @@ class App extends StatelessWidget {
             seedColor: const Color(0xFF5C6BC0)),
         useMaterial3: true,
       ),
-      home: const HomeScreen(),
+      home: const SessionBootstrapScreen(),
     );
   }
 }
